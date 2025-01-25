@@ -6,7 +6,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageEvent,
 )
 from nonebot import require, on_command, get_driver, on_keyword
-from nonebot.plugin import PluginMetadata, inherit_supported_adapters
+from nonebot.plugin import PluginMetadata
 from nonebot.typing import T_State
 from nonebot.params import CommandArg, ArgStr
 from nonebot.rule import to_me
@@ -46,9 +46,9 @@ __plugin_meta__ = PluginMetadata(
         "\n支持的时间格式有：\n" + "\n".join(time_format)
     ),
     type="application",
-    homepage="项目主页",
+    homepage="https://github.com/H-Elden/nonebot-plugin-remind",
     config=Config,
-    supported_adapters=inherit_supported_adapters("nonebot_plugin_apscheduler"),
+    supported_adapters={"~onebot.v11"},
 )
 
 # 获取驱动器实例
