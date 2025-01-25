@@ -3,10 +3,11 @@
   <br>
   <p><img src="https://github.com/A-kirami/nonebot-plugin-template/blob/resources/NoneBotPlugin.svg" width="240" alt="NoneBotPluginText"></p>
 </div>
-
 <div align="center">
+  
+# nonebot-plugin-remind
 
-# nonebot-plugin-template
+</div>
 
 ## 📖 介绍
 
@@ -28,7 +29,7 @@
 
 **pip**
 
-    pip install nonebot-plugin-template
+    pip install nonebot-plugin-remind
 
 打开 nonebot2 项目根目录下的 `pyproject.toml` 文件, 在 `[tool.nonebot]` 部分追加写入
 
@@ -38,7 +39,7 @@
 
 ## ⚙️ 配置
 
-在 nonebot2 项目的`.env`文件中添加下表中的必填配置
+在 nonebot2 项目的`.env`文件中添加如下可选配置
 
 | 配置项 | 必填 | 默认值 | 说明 |
 |:-----:|:----:|:----:|:----:|
@@ -46,7 +47,7 @@
 | `remind_keyword_error` | 否 | `Ture` | 触发“提醒”关键词时是否发送错误提示 |
 
 ## 🎉 使用
-### 指令表
+### 指令触发
 - 提醒
 - 提醒列表
 - 删除提醒
