@@ -117,14 +117,29 @@
 
 ### 示例图
 
-## 提醒关键词示例图
-![提醒关键词示例](readme_images\提醒关键词示例.jpg)
-
-## 提醒命令示例图
-![提醒命令示例](readme_images\提醒命令示例.jpg)
-
-## 提醒列表命令示例图
-![提醒列表命令示例](readme_images\提醒列表命令示例.jpg)
-
-## 删除提醒命令示例图
-![删除提醒命令示例](readme_images\删除提醒命令示例.jpg)
+<table style="width:100%; border-collapse: collapse;">
+  <thead>
+    <tr style="border: 1px solid black;">
+      <th style="text-align:center; border: 1px solid black;">提醒关键词示例图</th>
+      <th style="text-align:center; border: 1px solid black;">提醒命令示例图</th>
+      <th style="text-align:center; border: 1px solid black;">提醒列表命令示例图</th>
+      <th style="text-align:center; border: 1px solid black;">删除提醒命令示例图</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border: 1px solid black;">
+      <td style="text-align:center; border: 1px solid black;">
+        <img src="readme_images/提醒关键词示例.jpg" style="height:600px;" />
+      </td>
+      <td style="text-align:center; border: 1px solid black;">
+        <img src="readme_images/提醒命令示例.jpg" style="height:600px;" />
+      </td>
+      <td style="text-align:center; border: 1px solid black;">
+        <img src="readme_images/提醒列表命令示例.jpg" style="height:600px;" />
+      </td>
+      <td style="text-align:center; border: 1px solid black;">
+        <img src="readme_images/删除提醒命令示例.jpg" style="height:600px;" />
+      </td>
+    </tr>
+  </tbody>
+</table>
