@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional
 
+from .glm4 import parsed_time_glm4
 from .common import task_info, time_format, TASKS_FILE
 from .config import remind_config
 
@@ -47,16 +48,17 @@ def cq_to_at(s: str):
     return replaced_string
 
 
-def parsed_time(remind_time: str) -> datetime:
+async def parsed_time(remind_time: str) -> datetime:
     """将提醒时间str解析为datetime"""
     now = datetime.now()
     final_time = None
 
-    # 删除所有空格
-    no_space_string = remind_time.replace(" ", "")
-    # 将 "-", ":", "：" 替换为 "."
+    # 将可能的分隔符 " ", "-", ":", "：" 替换为 "."
     result_string = (
-        no_space_string.replace("-", ".").replace(":", ".").replace("：", ".")
+        remind_time.replace(" ", ".")
+        .replace("-", ".")
+        .replace(":", ".")
+        .replace("：", ".")
     )
 
     # 尝试解析不同格式的时间
@@ -78,6 +80,15 @@ def parsed_time(remind_time: str) -> datetime:
             # 找到距离当前时间最近的未来的这个时间点，也就是如果今天已经过了这个时间点，就定时到明天
             if final_time <= now:
                 final_time += timedelta(days=1)
+
+    # 使用GLM-4的大语言模型解析时间
+    else:
+        res = await parsed_time_glm4(remind_time)
+        if res != "None" and res != "Error":
+            try:
+                final_time = datetime.strptime(res, "%Y-%m-%d %H:%M")
+            except ValueError:
+                pass
     return final_time
 
 

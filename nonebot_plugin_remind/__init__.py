@@ -191,7 +191,7 @@ async def _(event: Event, state: T_State, args: Message = CommandArg()):
 async def _(state: T_State, remind_time: str = ArgStr("remind_time")):
     if remind_time.strip().lower() in ["取消", "cancel"]:
         await remind.finish("已取消提醒设置。")
-    final_time = parsed_time(remind_time)
+    final_time = await parsed_time(remind_time)
     if final_time is None:
         await remind.reject(
             "时间格式不正确。请重新输入或发送“取消”中止交互。\n仅支持以下格式：\n"
@@ -235,7 +235,7 @@ async def _(event: MessageEvent, state: T_State):
             b = parts[1].strip() if len(parts) > 1 else ""
 
             # 保存时间参数
-            remind_time = parsed_time(a)
+            remind_time = await parsed_time(a)
             if remind_time is None:
                 state["success"] = False
                 if remind_config.remind_keyword_error:
