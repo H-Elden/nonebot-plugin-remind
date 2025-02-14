@@ -52,21 +52,28 @@ def parsed_time(remind_time: str) -> datetime:
     now = datetime.now()
     final_time = None
 
+    # 删除所有空格
+    no_space_string = remind_time.replace(" ", "")
+    # 将 "-", ":", "：" 替换为 "."
+    result_string = (
+        no_space_string.replace("-", ".").replace(":", ".").replace("：", ".")
+    )
+
     # 尝试解析不同格式的时间
     for fmt in time_format:
         try:
-            final_time = datetime.strptime(remind_time, fmt)
+            final_time = datetime.strptime(result_string, fmt)
             break
         except ValueError:
             continue
 
     if final_time:
         # 调整时间格式
-        if fmt == "%m.%d.%H.%M" or fmt == "%m.%d.%H:%M":
+        if fmt == "%m.%d.%H.%M":
             final_time = final_time.replace(year=now.year)
             if final_time <= now:
                 final_time = final_time.replace(year=now.year + 1)
-        elif fmt == "%H.%M" or fmt == "%H:%M":
+        elif fmt == "%H.%M":
             final_time = final_time.replace(year=now.year, month=now.month, day=now.day)
             # 找到距离当前时间最近的未来的这个时间点，也就是如果今天已经过了这个时间点，就定时到明天
             if final_time <= now:
