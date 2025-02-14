@@ -97,6 +97,8 @@ def colloquial_time(remind_time: datetime) -> str:
     将datetime转换成口语化的时间表达。
     """
     now = datetime.now()
+    cn_days = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    weekday = cn_days[remind_time.weekday()]
     diff_date = (remind_time.date() - now.date()).days
     diff_year = remind_time.year - now.year
     res = ""
@@ -104,20 +106,24 @@ def colloquial_time(remind_time: datetime) -> str:
         if diff_date == 0:
             res += "今天"
         elif diff_date == 1:
-            res += "明天"
+            res += f"明天({weekday})"
         elif diff_date == 2:
-            res += "后天"
+            res += f"后天({weekday})"
         elif diff_date > 2:
-            res += f"{diff_date}天后({remind_time.month}月{remind_time.day}号)"
+            res += (
+                f"{diff_date}天后({remind_time.month}月{remind_time.day}号 {weekday})"
+            )
         else:
             # 如果diff_date是负数，说明提醒时间在现在之前
-            res += f"{abs(diff_date)}天前"
+            res += f"{abs(diff_date)}天前({weekday})"
     elif diff_year == 1:
-        res += f"明年{remind_time.month}月{remind_time.day}号"
+        res += f"明年{remind_time.month}月{remind_time.day}号({weekday})"
     elif diff_year == 2:
-        res += f"后年{remind_time.month}月{remind_time.day}号"
+        res += f"后年{remind_time.month}月{remind_time.day}号({weekday})"
     else:
-        res += f"{remind_time.year}年{remind_time.month}月{remind_time.day}号"
+        res += (
+            f"{remind_time.year}年{remind_time.month}月{remind_time.day}号({weekday})"
+        )
     # 定义时间段的口语化表达
     time_periods = [
         (0, 5, "凌晨"),
