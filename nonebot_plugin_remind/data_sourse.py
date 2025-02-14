@@ -29,6 +29,7 @@ async def set_reminder(event: Event, state: T_State):
     delay = (remind_time - now).total_seconds()
     if delay <= 0:
         await bot.send(event, "提醒时间已过，请设置未来的时间。")
+        return
 
     # 给提醒时间加上随机秒数，防止同一秒发送过多消息被tx检测到
     remind_time += timedelta(seconds=random.randint(0, 30))
