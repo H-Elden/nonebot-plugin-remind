@@ -1,31 +1,33 @@
 import re
 import json
+import jsonpickle
+from nonebot.log import logger
 from datetime import datetime, timedelta
 from typing import Optional
 
-from .glm4 import parsed_time_glm4
-from .common import task_info, time_format, TASKS_FILE
+from apscheduler.triggers.cron import CronTrigger
+from .common import task_info, TASKS_FILE
 from .config import remind_config
+
+
+# 自定义 JSON 编码器
+class CustomJSONEncoder(json.JSONEncoder):
+    def __init__(self, **kwargs):
+        kwargs["ensure_ascii"] = False
+        super().__init__(**kwargs)
+
+
+# 设置 jsonpickle 使用自定义编码器
+jsonpickle.set_encoder_options("json", cls=CustomJSONEncoder)
 
 
 def save_tasks_to_file():
     """
     将当前提醒任务保存到本地文件
     """
-    data = {
-        task_id: {
-            "task_id": task["task_id"],
-            "reminder_user_id": task["reminder_user_id"],
-            "user_ids": task["user_ids"],
-            "remind_time": task["remind_time"].strftime("%Y-%m-%d %H:%M:%S"),
-            "reminder_message": task["reminder_message"],
-            "is_group": task["is_group"],
-            "group_id": task["group_id"],
-        }
-        for task_id, task in task_info.items()
-    }
     with open(TASKS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+        f.write(jsonpickle.encode(task_info, indent=4))
+    logger.info(f"提醒任务文件已保存到 {TASKS_FILE}")
 
 
 def cq_to_at(s: str):
@@ -48,54 +50,24 @@ def cq_to_at(s: str):
     return replaced_string
 
 
-async def parsed_time(remind_time: str) -> datetime:
-    """将提醒时间str解析为datetime"""
-    now = datetime.now()
-    final_time = None
-
-    # 将可能的分隔符 " ", "-", ":", "：" 替换为 "."
-    result_string = (
-        remind_time.replace(" ", ".")
-        .replace("-", ".")
-        .replace(":", ".")
-        .replace("：", ".")
-    )
-
-    # 尝试解析不同格式的时间
-    for fmt in time_format:
-        try:
-            final_time = datetime.strptime(result_string, fmt)
-            break
-        except ValueError:
-            continue
-
-    if final_time:
-        # 调整时间格式
-        if fmt == "%m.%d.%H.%M":
-            final_time = final_time.replace(year=now.year)
-            if final_time <= now:
-                final_time = final_time.replace(year=now.year + 1)
-        elif fmt == "%H.%M":
-            final_time = final_time.replace(year=now.year, month=now.month, day=now.day)
-            # 找到距离当前时间最近的未来的这个时间点，也就是如果今天已经过了这个时间点，就定时到明天
-            if final_time <= now:
-                final_time += timedelta(days=1)
-
-    # 使用GLM-4的大语言模型解析时间
+def colloquial_time(remind_time: datetime | CronTrigger) -> str:
+    """
+    将remind_time转换成口语化的时间表达。
+    """
+    if isinstance(remind_time, datetime):
+        return colloquial_datetime(remind_time)
+    elif isinstance(remind_time, CronTrigger):
+        return colloquial_crontrigger(remind_time)
     else:
-        res = await parsed_time_glm4(remind_time)
-        if res != "None" and res != "Error":
-            try:
-                final_time = datetime.strptime(res, "%Y-%m-%d %H:%M")
-            except ValueError:
-                pass
-    return final_time
+        raise TypeError("提醒时间类型不正确")
 
 
-def colloquial_time(remind_time: datetime) -> str:
+def colloquial_datetime(remind_time: datetime) -> str:
     """
     将datetime转换成口语化的时间表达。
     """
+    if not isinstance(remind_time, datetime):
+        return f"{remind_time}"
     now = datetime.now()
     cn_days = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday = cn_days[remind_time.weekday()]
@@ -158,6 +130,10 @@ def colloquial_time(remind_time: datetime) -> str:
     return res
 
 
+def colloquial_crontrigger(trigger: CronTrigger) -> str:
+    return f"{trigger[4:]}"
+
+
 def format_timedelta(td: timedelta):
     def add_unit(value, unit, result: list):
         if value:
@@ -177,7 +153,7 @@ def format_timedelta(td: timedelta):
 
 
 def get_user_tasks(user_id: str, group_id: Optional[int], sort: bool) -> list[dict]:
-    """从全局变量task_info获取用户的提醒任务
+    """从全局变量task_info获取用户的单次提醒任务
 
     参数：
         user_id:str 提醒人用户id
@@ -192,6 +168,7 @@ def get_user_tasks(user_id: str, group_id: Optional[int], sort: bool) -> list[di
             task
             for task in task_info.values()
             if task["reminder_user_id"] == user_id
+            and task["type"] == "datetime"
             and (group_id is None or task["group_id"] == group_id)
         ]
     # 私聊仅列出私聊提醒
@@ -200,6 +177,7 @@ def get_user_tasks(user_id: str, group_id: Optional[int], sort: bool) -> list[di
             task
             for task in task_info.values()
             if task["reminder_user_id"] == user_id
+            and task["type"] == "datetime"
             and (
                 (group_id is None and task["group_id"] == int(user_id))
                 or task["group_id"] == group_id
@@ -207,4 +185,37 @@ def get_user_tasks(user_id: str, group_id: Optional[int], sort: bool) -> list[di
         ]
     if sort:
         user_tasks.sort(key=lambda x: x["remind_time"])
+    return user_tasks
+
+
+def get_user_cron_tasks(user_id: str, group_id: Optional[int]) -> list[dict]:
+    """从全局变量task_info获取用户的循环提醒任务
+
+    参数：
+        user_id:str 提醒人用户id
+        group_id:int 群聊id, 私聊为None
+    返回：
+        任务列表
+    """
+    # 私聊列出所有提醒
+    if remind_config.private_list_all:
+        user_tasks = [
+            task
+            for task in task_info.values()
+            if task["reminder_user_id"] == user_id
+            and task["type"] == "CronTrigger"
+            and (group_id is None or task["group_id"] == group_id)
+        ]
+    # 私聊仅列出私聊提醒
+    else:
+        user_tasks = [
+            task
+            for task in task_info.values()
+            if task["reminder_user_id"] == user_id
+            and task["type"] == "CronTrigger"
+            and (
+                (group_id is None and task["group_id"] == int(user_id))
+                or task["group_id"] == group_id
+            )
+        ]
     return user_tasks

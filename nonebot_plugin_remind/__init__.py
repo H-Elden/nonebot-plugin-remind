@@ -17,7 +17,7 @@ require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler
 
 import os
-import json
+import jsonpickle
 import random
 from datetime import datetime, timedelta
 from .config import Config, remind_config
@@ -25,10 +25,12 @@ from .common import time_format, task_info, TASKS_FILE
 from .utils import (
     save_tasks_to_file,
     format_timedelta,
-    parsed_time,
     get_user_tasks,
+    get_user_cron_tasks,
+    colloquial_time,
     cq_to_at,
 )
+from .parse import parse_time
 from .data_sourse import send_reminder, set_reminder
 
 __plugin_meta__ = PluginMetadata(
@@ -63,70 +65,87 @@ if scheduler is None:
 # 创建命令处理器
 remind = on_command("remind", aliases={"提醒"}, priority=5, block=True)
 remind_keyword = on_keyword({"提醒"}, rule=to_me(), priority=6, block=True)
-del_remind = on_command("dr", aliases={"删除提醒"}, priority=5, block=True)
-list_reminds = on_command("lr", aliases={"提醒列表"}, priority=5, block=True)
+del_remind = on_command(
+    "dr", aliases={"删除提醒", "删除单次提醒"}, priority=5, block=True
+)
+list_reminds = on_command(
+    "lr", aliases={"提醒列表", "单次提醒列表"}, priority=5, block=True
+)
+del_cron_remind = on_command("drc", aliases={"删除循环提醒"}, priority=5, block=True)
+list_cron_reminds = on_command("lrc", aliases={"循环提醒列表"}, priority=5, block=True)
 
 
 # 在机器人启动时加载任务信息
 @driver.on_startup
 async def load_tasks():
     if os.path.exists(TASKS_FILE):
+        global task_info
         with open(TASKS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            total_tasks = 0
-            expired_tasks = 0
-            current_time = datetime.now()
-            global task_info
-            for task_id, task_data in data.items():
-                # 获取任务信息
-                reminder_user_id = task_data["reminder_user_id"]
-                remind_time = datetime.strptime(
-                    task_data["remind_time"], "%Y-%m-%d %H:%M:%S"
+            # 直接使用=赋值是不对的，会创建一个新的局部变量而不是修改全局变量
+            task_info.clear()
+            task_info.update(jsonpickle.decode(f.read()))
+        total_tasks = 0
+        expired_tasks = 0
+        current_time = datetime.now()
+        for task_id in task_info:
+            # 检查定时任务是否过时
+            if (
+                task_info[task_id]["type"] == "datetime"
+                and task_info[task_id]["remind_time"] <= current_time
+            ):
+                # 过时任务数+1
+                expired_tasks += 1
+                # 30秒内发完所有过时信息的提示
+                n = random.randint(10, 30)
+                delay_time = (
+                    current_time
+                    - task_info[task_id]["remind_time"]
+                    + timedelta(seconds=n)
                 )
-                user_ids = task_data["user_ids"]
-                reminder_message = task_data["reminder_message"]
-                is_group = task_data["is_group"]
-                group_id = task_data["group_id"]
-                # 检查定时任务是否过时
-                if remind_time <= current_time:
-                    # 过时任务数+1
-                    expired_tasks += 1
-                    # 30秒内发完所有过时信息的提示
-                    n = random.randint(10, 30)
-                    delay_time = current_time - remind_time + timedelta(seconds=n)
-                    reminder_message += f'\n【十分抱歉，由于账号离线，此提醒任务已超时{format_timedelta(delay_time)}。原定提醒时间为：{remind_time.strftime("%Y-%m-%d %H:%M")}】'
-                    remind_time = current_time + timedelta(seconds=n)
-                else:
-                    # 如果没有过时，总任务数+1
-                    total_tasks += 1
-                    # 没有超时才需要存储这些信息
-                    task_info[task_id] = {
-                        "task_id": task_id,
-                        "reminder_user_id": reminder_user_id,
-                        "user_ids": user_ids,
-                        "remind_time": remind_time,
-                        "reminder_message": reminder_message,
-                        "is_group": is_group,
-                        "group_id": group_id,
-                    }
-
-                # 恢复定时任务
+                task_info[task_id][
+                    "reminder_message"
+                ] += f'\n【十分抱歉，由于账号离线，此提醒任务已超时{format_timedelta(delay_time)}。原定提醒时间为：{task_info[task_id]["remind_time"].strftime("%Y-%m-%d %H:%M")}】'
+                task_info[task_id]["remind_time"] = current_time + timedelta(seconds=n)
+            else:
+                # 如果没有过时，总任务数+1
+                total_tasks += 1
+            # 恢复定时任务
+            if task_info[task_id]["type"] == "datetime":
                 scheduler.add_job(
                     send_reminder,
                     "date",
-                    run_date=remind_time,
-                    args=[task_id, user_ids, reminder_message, is_group, group_id],
+                    run_date=task_info[task_id]["remind_time"],
+                    args=[
+                        task_id,
+                        task_info[task_id]["user_ids"],
+                        task_info[task_id]["reminder_message"],
+                        task_info[task_id]["is_group"],
+                        task_info[task_id]["group_id"],
+                    ],
+                    id=task_id,
+                )
+            else:
+                scheduler.add_job(
+                    send_reminder,
+                    trigger=task_info[task_id]["remind_time"],
+                    args=[
+                        task_id,
+                        task_info[task_id]["user_ids"],
+                        task_info[task_id]["reminder_message"],
+                        task_info[task_id]["is_group"],
+                        task_info[task_id]["group_id"],
+                    ],
                     id=task_id,
                 )
 
-            # 输出信息
-            if expired_tasks:
-                info = f"已载入 {total_tasks} 个任务，删除 {expired_tasks} 个过时任务"
-                logger.warning(info)
-            else:
-                info = f"全部 {total_tasks} 个定时任务均已载入完成！"
-                logger.success(info)
-            save_tasks_to_file()
+        # 输出信息
+        if expired_tasks:
+            info = f"已载入 {total_tasks} 个任务，删除 {expired_tasks} 个过时任务"
+            logger.warning(info)
+        else:
+            info = f"全部 {total_tasks} 个定时任务均已载入完成！"
+            logger.success(info)
+        save_tasks_to_file()
 
 
 # 初始化状态
@@ -191,7 +210,8 @@ async def _(event: Event, state: T_State, args: Message = CommandArg()):
 async def _(state: T_State, remind_time: str = ArgStr("remind_time")):
     if remind_time.strip().lower() in ["取消", "cancel"]:
         await remind.finish("已取消提醒设置。")
-    final_time = await parsed_time(remind_time)
+    final_time = await parse_time(remind_time)
+    logger.debug(f"解析提醒时间结果为：{remind_time}")
     if final_time is None:
         await remind.reject(
             "时间格式不正确。请重新输入或发送“取消”中止交互。\n仅支持以下格式：\n"
@@ -235,7 +255,8 @@ async def _(event: MessageEvent, state: T_State):
             b = parts[1].strip() if len(parts) > 1 else ""
 
             # 保存时间参数
-            remind_time = await parsed_time(a)
+            remind_time = await parse_time(a)
+            logger.debug(f"解析提醒时间结果为：{remind_time}")
             if remind_time is None:
                 state["success"] = False
                 if remind_config.remind_keyword_error:
@@ -337,7 +358,7 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
                 job = scheduler.get_job(task_id)
                 if job:
                     job.remove()
-                    msg = rmsg if len(rmsg) < 10 else rmsg[:20] + "..."
+                    msg = rmsg if len(rmsg) <= 20 else rmsg[:20] + "..."
                     logger.success(f"成功删除提醒[{task_id}]:{repr(msg)}")
                     del task_info[task_id]
                 else:
@@ -384,7 +405,7 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
                 job.remove()
                 info = (
                     user_tasks[index]["reminder_message"]
-                    if len(user_tasks[index]["reminder_message"]) < 10
+                    if len(user_tasks[index]["reminder_message"]) <= 20
                     else user_tasks[index]["reminder_message"][:20] + "..."
                 )
                 logger.success(f"成功删除提醒[{task_id}]:{repr(info)}")
@@ -424,3 +445,104 @@ async def list_reminds_handler(event: Event, args: Message = CommandArg()):
         await list_reminds.send(Message("您的提醒任务列表:\n" + msgs))
     else:
         await list_reminds.send("您目前没有设置任何提醒任务。")
+
+
+# 删除循环提醒任务
+@del_cron_remind.handle()
+async def del_cron_remind_handler(event: Event, args: Message = CommandArg()):
+    reminder_user_id = event.get_user_id()
+    group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
+    # 用户输入的任务ID
+    id = args.extract_plain_text().strip()
+    if not id:
+        await del_cron_remind.finish("请提供要删除的循环任务ID。")
+
+    try:
+        if id == "all":
+            user_tasks = get_user_cron_tasks(reminder_user_id, group_id)
+            for task in user_tasks:
+                task_id = task["task_id"]
+                rmsg = task["reminder_message"]
+                job = scheduler.get_job(task_id)
+                if job:
+                    job.remove()
+                    msg = rmsg if len(rmsg) <= 20 else rmsg[:20] + "..."
+                    logger.success(f"成功删除循环提醒[{task_id}]:{repr(msg)}")
+                    del task_info[task_id]
+                else:
+                    raise RuntimeError(f"任务[{task_id}]不存在或已被删除。")
+            save_tasks_to_file()  # 更新任务信息到文件
+            await del_cron_remind.finish("成功删除全部循环提醒！")
+        # 参数不是"all"的情况下
+        indexes = []
+        # 采用空白符分割参数
+        ids = id.split()
+        # 解析每个参数
+        for idd in ids:
+            parts = idd.split("-")
+            if len(parts) == 1:
+                indexes.append(int(idd) - 1)
+            elif len(parts) == 2:
+                l_index = int(parts[0]) - 1
+                r_index = int(parts[1]) - 1
+                if l_index > r_index:
+                    raise ValueError(f"{idd}为不正确的参数。")
+                indexes.extend(range(l_index, r_index + 1))
+            else:
+                raise ValueError(f'"{idd}"为不正确的参数格式。')
+        # 给列表去重
+        indexes = list(set(indexes))
+        # 获取用户任务列表
+        user_tasks = get_user_cron_tasks(reminder_user_id, group_id)
+
+        msg_list = []
+        for index in indexes:
+            if index < 0 or index >= len(user_tasks):
+                raise ValueError("任务ID超出范围")
+            task_id = user_tasks[index]["task_id"]
+            job = scheduler.get_job(task_id)
+            msg = cq_to_at(
+                user_tasks[index]["user_ids"] + user_tasks[index]["reminder_message"]
+            )
+            if job:
+                job.remove()
+                info = (
+                    user_tasks[index]["reminder_message"]
+                    if len(user_tasks[index]["reminder_message"]) <= 20
+                    else user_tasks[index]["reminder_message"][:20] + "..."
+                )
+                logger.success(f"成功删除循环提醒[{task_id}]:{repr(info)}")
+                del task_info[task_id]
+                msg_list.append(f"{index+1:02d}  {msg}")
+            else:
+                raise RuntimeError(f"任务{index+1:02d}不存在或已被删除。")
+        msgs = "\n\n".join(msg_list)
+        await del_cron_remind.send(Message("成功删除以下循环提醒任务！\n" + msgs))
+        save_tasks_to_file()  # 更新任务信息到文件
+    except ValueError as e:
+        await del_cron_remind.send(f'任务ID"{id}"参数错误：{e}')
+    except RuntimeError as e:
+        await del_cron_remind.send(f"运行时错误：{e}")
+
+
+# 列出用户的循环提醒任务
+@list_cron_reminds.handle()
+async def list_cron_reminds_handler(event: Event):
+    reminder_user_id = event.get_user_id()
+    group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
+    user_tasks = get_user_cron_tasks(reminder_user_id, group_id)
+
+    if user_tasks:
+        msg_list = []
+        for index, task in enumerate(user_tasks, start=1):
+            remind_time = task["remind_time"]
+            msg = f"{index:02d} 时间: {colloquial_time(remind_time)}, 内容: "
+            user_ids = task["user_ids"]
+            reminder_message = task["reminder_message"]
+            # 将其中的at改为纯文本，避免打扰别人
+            msg += cq_to_at(user_ids + reminder_message)
+            msg_list.append(msg)
+        msgs = "\n\n".join(msg_list)
+        await list_cron_reminds.send(Message("您的循环提醒任务列表:\n" + msgs))
+    else:
+        await list_cron_reminds.send("您目前没有设置任何循环提醒任务。")

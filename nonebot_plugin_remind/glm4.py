@@ -8,10 +8,11 @@ from .config import remind_config
 
 
 GLM_4_MODEL = remind_config.glm_4_model
+GLM_4_MODEL_CRON = remind_config.glm_4_model_cron
 GLM_API_KEY = remind_config.glm_api_key
 
 
-async def parsed_time_glm4(time_text: str):
+async def parsed_datetime_glm4(time_text: str):
     """异步调用GLM-4的API解析时间"""
     if GLM_4_MODEL == "" or GLM_API_KEY == "":
         logger.warning("未配置GLM模型或API_KEY")
@@ -44,6 +45,9 @@ async def parsed_time_glm4(time_text: str):
         )
         logger.debug(result_response)
         task_status = result_response.task_status
+        if task_status == "FAILED":
+            logger.error(f"基于{GLM_4_MODEL}模型的解析失败！")
+            return "Failed"
         if task_status == "SUCCESS":
             logger.success(
                 f"基于{GLM_4_MODEL}模型的解析结果：{result_response.choices[0].message.content}"
@@ -60,7 +64,7 @@ async def parsed_time_glm4(time_text: str):
 
 async def main():
     time_text = input("输入要解析的时间文本：")
-    result = await parsed_time_glm4(time_text)
+    result = await parsed_datetime_glm4(time_text)
     print("解析结果为：", result)
 
 

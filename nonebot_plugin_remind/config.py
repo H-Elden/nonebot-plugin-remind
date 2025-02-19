@@ -6,6 +6,7 @@ class Config(BaseModel):
     private_list_all: bool = True
     remind_keyword_error: bool = True
     glm_4_model: str = ""
+    glm_4_model_cron: str = ""
     glm_api_key: str = ""
 
 
