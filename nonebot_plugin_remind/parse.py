@@ -1,7 +1,8 @@
 import re
+import ast
 from datetime import datetime, timedelta
 from apscheduler.triggers.cron import CronTrigger
-from .glm4 import parsed_datetime_glm4
+from .glm4 import parsed_datetime_glm4, parsed_cron_time_glm4
 from .common import time_format
 
 from nonebot.log import logger
@@ -28,7 +29,7 @@ async def parse_time(remind_time: str) -> datetime | CronTrigger | None:
     try:
         # 把循环提醒时间解析为CronTrigger
         if remind_time.startswith("每"):
-            return parse_cron_trigger(remind_time)
+            return await parse_cron_trigger(remind_time)
         # 把单次提醒时间解析为datetime
         else:
             return await parse_date_trigger(remind_time)
@@ -39,7 +40,7 @@ async def parse_time(remind_time: str) -> datetime | CronTrigger | None:
 
 async def parse_date_trigger(time: str) -> datetime | None:
     """将提醒时间str解析为datetime"""
-    logger.debug(f'解析单次提醒时间:"{time}"')
+    logger.info(f'解析单次提醒时间:"{time}"')
     now = datetime.now()
     final_time = None
 
@@ -72,10 +73,8 @@ async def parse_date_trigger(time: str) -> datetime | None:
     else:
         res = await parsed_datetime_glm4(time)
         if res != "None" and res != "Error":
-            try:
-                final_time = datetime.strptime(res, "%Y-%m-%d %H:%M")
-            except ValueError:
-                pass
+            final_time = datetime.strptime(res, "%Y-%m-%d %H:%M")
+
     return final_time
 
 
@@ -88,10 +87,11 @@ def validate_date_params(params: dict):
             raise ValueError(f"无效的日期：{month}月没有{day}日")
 
 
-def parse_cron_trigger(time: str) -> CronTrigger:
-    logger.debug(f'解析循环提醒时间:"{time}"')
+async def parse_cron_trigger(time: str) -> CronTrigger:
+    logger.info(f'解析循环提醒时间:"{time}"')
     # 正则匹配可能的时间表述
     patterns = [
+        (r"每个?小?时的?(\d{1,2})分?", ["minute"]),
         (r"每天的?(\d{1,2})[：:.点](\d{1,2})分?", ["hour", "minute"]),
         (
             r"每个?月的?(\d{1,2})[号日.]的?(\d{1,2})[：:.点](\d{1,2})分?",
@@ -151,7 +151,23 @@ def parse_cron_trigger(time: str) -> CronTrigger:
             # 日期组合校验
             validate_date_params(params)
 
-            print(", ".join(f"{k}={v}" for k, v in params.items()))
+            logger.debug(
+                "正则解析参数为" + ", ".join(f"{k}={v}" for k, v in params.items())
+            )
             return CronTrigger(**params)
 
-    raise ValueError("无法解析的时间格式")
+    # 无法使用正则表达式解析，采用glm-4模型解析
+    params_str = await parsed_cron_time_glm4(time)
+    params = ast.literal_eval(params_str)
+    if isinstance(params, dict):
+        return CronTrigger(**params)
+    else:
+        raise ValueError(f"无法解析循环时间{time}")
+
+
+if __name__ == "__main__":
+    test = ["每天13点30", "每小时30分", "每年12月3号15.22", "每周三14.00"]
+
+    for s in test:
+        res = parse_cron_trigger(s)
+        print(res)

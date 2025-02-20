@@ -5,7 +5,6 @@ from nonebot.log import logger
 from datetime import datetime, timedelta
 from typing import Optional
 
-from apscheduler.triggers.cron import CronTrigger
 from .common import task_info, TASKS_FILE
 from .config import remind_config
 
@@ -48,90 +47,6 @@ def cq_to_at(s: str):
     replaced_string = re.sub(pattern2, r"[at 你]", replaced_string)
 
     return replaced_string
-
-
-def colloquial_time(remind_time: datetime | CronTrigger) -> str:
-    """
-    将remind_time转换成口语化的时间表达。
-    """
-    if isinstance(remind_time, datetime):
-        return colloquial_datetime(remind_time)
-    elif isinstance(remind_time, CronTrigger):
-        return colloquial_crontrigger(remind_time)
-    else:
-        raise TypeError("提醒时间类型不正确")
-
-
-def colloquial_datetime(remind_time: datetime) -> str:
-    """
-    将datetime转换成口语化的时间表达。
-    """
-    if not isinstance(remind_time, datetime):
-        return f"{remind_time}"
-    now = datetime.now()
-    cn_days = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-    weekday = cn_days[remind_time.weekday()]
-    diff_date = (remind_time.date() - now.date()).days
-    diff_year = remind_time.year - now.year
-    res = ""
-    if diff_year == 0:
-        if diff_date == 0:
-            res += "今天"
-        elif diff_date == 1:
-            res += f"明天({weekday})"
-        elif diff_date == 2:
-            res += f"后天({weekday})"
-        elif diff_date > 2:
-            res += (
-                f"{diff_date}天后({remind_time.month}月{remind_time.day}号 {weekday})"
-            )
-        else:
-            # 如果diff_date是负数，说明提醒时间在现在之前
-            res += f"{abs(diff_date)}天前({weekday})"
-    elif diff_year == 1:
-        res += f"明年{remind_time.month}月{remind_time.day}号({weekday})"
-    elif diff_year == 2:
-        res += f"后年{remind_time.month}月{remind_time.day}号({weekday})"
-    else:
-        res += (
-            f"{remind_time.year}年{remind_time.month}月{remind_time.day}号({weekday})"
-        )
-    # 定义时间段的口语化表达
-    time_periods = [
-        (0, 5, "凌晨"),
-        (5, 7, "清晨"),
-        (7, 12, "上午"),
-        (12, 13, "中午"),
-        (13, 17, "下午"),
-        (17, 19, "傍晚"),
-        (19, 22, "晚上"),
-        (22, 24, "夜里"),
-    ]
-
-    for start, end, period in time_periods:
-        if start <= remind_time.hour < end:
-            res += period
-            break
-
-    # 格式化时间，只显示小时和分钟，12小时制
-    if remind_time.hour > 12:
-        time_str = f"{remind_time.hour-12}点"
-    else:
-        time_str = f"{remind_time.hour}点"
-
-    if remind_time.minute == 30:
-        time_str += "半"
-    elif remind_time.minute == 0:
-        time_str += "整"
-    else:
-        time_str += f"{remind_time.minute}分"
-    res += time_str
-
-    return res
-
-
-def colloquial_crontrigger(trigger: CronTrigger) -> str:
-    return f"{str(trigger)[4:]}"
 
 
 def format_timedelta(td: timedelta):

@@ -27,9 +27,9 @@ from .utils import (
     format_timedelta,
     get_user_tasks,
     get_user_cron_tasks,
-    colloquial_time,
     cq_to_at,
 )
+from .colloquial import colloquial_time
 from .parse import parse_time
 from .data_sourse import send_reminder, set_reminder
 
@@ -88,6 +88,12 @@ async def load_tasks():
         expired_tasks = 0
         current_time = datetime.now()
         for task_id in task_info:
+            # 对旧版本(<=0.1.3)的格式处理一下适配新版本，后续可删
+            if "type" not in task_info[task_id]:
+                task_info[task_id]["type"] = "datetime"
+                task_info[task_id]["remind_time"] = datetime.strptime(
+                    task_info[task_id]["remind_time"], "%Y-%m-%d %H:%M:%S"
+                )
             # 检查定时任务是否过时
             if (
                 task_info[task_id]["type"] == "datetime"

@@ -12,7 +12,8 @@ from nonebot.log import logger
 import random
 
 from .common import task_info
-from .utils import save_tasks_to_file, colloquial_time
+from .utils import save_tasks_to_file
+from .colloquial import colloquial_time
 
 
 async def set_date_reminder(event: Event, state: T_State):
