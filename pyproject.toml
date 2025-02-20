@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-remind"
-version = "0.1.5"
+version = "0.1.6"
 description = "nonebot2插件：提供符合中国宝宝体质的定时提醒功能~"
 authors = [
     {name = "Elden",email = "h_elden@qq.com"}
