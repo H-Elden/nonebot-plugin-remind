@@ -119,15 +119,15 @@ async def parse_cron_trigger(time: str) -> CronTrigger:
                     converted = []
                     for char in value_str:
                         num = {
-                            "日": 0,
-                            "天": 0,
-                            "七": 0,
-                            "一": 1,
-                            "二": 2,
-                            "三": 3,
-                            "四": 4,
-                            "五": 5,
-                            "六": 6,
+                            "日": 6,
+                            "天": 6,
+                            "七": 6,
+                            "一": 0,
+                            "二": 1,
+                            "三": 2,
+                            "四": 3,
+                            "五": 4,
+                            "六": 5,
                         }.get(char)
                         if num is None:
                             raise ValueError(f"无效的星期字符: {char}")
