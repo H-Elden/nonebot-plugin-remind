@@ -131,7 +131,7 @@ def colloquial_datetime(remind_time: datetime) -> str:
 
 
 def colloquial_crontrigger(trigger: CronTrigger) -> str:
-    return f"{trigger[4:]}"
+    return f"{str(trigger)[4:]}"
 
 
 def format_timedelta(td: timedelta):
