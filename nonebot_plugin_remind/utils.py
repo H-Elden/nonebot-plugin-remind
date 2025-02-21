@@ -34,7 +34,7 @@ def cq_to_at(s: str):
     将CQ码中at的部分转换成纯文本
     """
     # 第一种情况：[CQ:at,qq=数字,name=文字]的模式
-    pattern1 = r"\[CQ:at,qq=\d+,name=(.*?)\]"
+    pattern1 = r"\[CQ:at,qq=\d+,name=@?(.*?)\]"
     # 使用正则表达式替换匹配到的CQ码
     replaced_string = re.sub(pattern1, r"[at \1]", s)
 

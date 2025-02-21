@@ -20,7 +20,7 @@ async def set_date_reminder(event: Event, state: T_State):
     """设置单次定时提醒"""
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
     remind_time = state["remind_time"]  # datetime
-    reminder_message = state["reminder_message"]
+    reminder_message = state["reminder_message"]  # Message
 
     # 当前时间
     now = datetime.now()
@@ -65,7 +65,7 @@ async def set_date_reminder(event: Event, state: T_State):
         "user_ids": user_ids,  # str
         "type": "datetime",  # str
         "remind_time": remind_time,  # datetime
-        "reminder_message": reminder_message,  # str
+        "reminder_message": reminder_message,  # Message
         "is_group": is_group,  # bool
         "group_id": group_id,  # int
     }
@@ -75,7 +75,7 @@ async def set_cron_reminder(event: Event, state: T_State):
     """设置循环定时提醒"""
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
     cron_trigger = state["remind_time"]  # CronTrigger
-    reminder_message = state["reminder_message"]
+    reminder_message = state["reminder_message"]  # Message
 
     # 判断是私聊还是群聊
     is_group = isinstance(event, GroupMessageEvent)
@@ -108,7 +108,7 @@ async def set_cron_reminder(event: Event, state: T_State):
         "user_ids": user_ids,  # str
         "type": "CronTrigger",  # str
         "remind_time": cron_trigger,  # CronTrigger
-        "reminder_message": reminder_message,  # str
+        "reminder_message": reminder_message,  # Message
         "is_group": is_group,  # bool
         "group_id": group_id,  # int
     }
@@ -127,7 +127,7 @@ async def set_reminder(event: Event, state: T_State):
         else:
             await set_cron_reminder(event, state)
     except Exception as e:
-        await bot.send(event, f"{e}")
+        await bot.send(event, f"{type(e).__name__}: {e}")
         return
 
     # 构建消息
@@ -169,25 +169,33 @@ async def set_reminder(event: Event, state: T_State):
 async def send_reminder(
     task_id: str,
     user_ids: str,
-    reminder_message: str,
+    reminder_message: Message,
     is_group: bool = False,
     group_id: int = None,
 ):
     bot = nonebot.get_bot()
+    str_msg = str(reminder_message)
     if is_group:
-        message = Message(user_ids + reminder_message)
-        await bot.send_group_msg(group_id=group_id, message=message)
+        message = Message(user_ids) + reminder_message
+        try:
+            await bot.send_group_msg(group_id=group_id, message=message)
+        except Exception as e:
+            await bot.send_group_msg(
+                group_id=group_id,
+                message=Message(user_ids) + f"\n{type(e).__name__}: {e}\n{str_msg}",
+            )
     else:
         # 发送提醒信息到私聊，私聊时group_id即为用户qq号
-        await bot.send_private_msg(user_id=group_id, message=Message(reminder_message))
+        try:
+            await bot.send_private_msg(user_id=group_id, message=reminder_message)
+        except Exception:
+            await bot.send_private_msg(
+                user_id=group_id, message=f"\n{type(e).__name__}: {e}\n{str_msg}"
+            )
 
     # 任务完成后从任务信息中移除，单次提醒才移除
     if task_id in task_info and task_info[task_id]["type"] == "datetime":
         del task_info[task_id]
-        msg = (
-            reminder_message
-            if len(reminder_message) <= 20
-            else reminder_message[:20] + "..."
-        )
+        msg = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
         logger.success(f"成功发送提醒[{task_id}]:{repr(msg)}")
         save_tasks_to_file()  # 更新任务信息到文件

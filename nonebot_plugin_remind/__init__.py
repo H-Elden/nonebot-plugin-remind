@@ -97,6 +97,11 @@ async def load_tasks():
                 task_info[task_id]["remind_time"] = datetime.strptime(
                     task_info[task_id]["remind_time"], "%Y-%m-%d %H:%M:%S"
                 )
+            # 对旧版本(<=0.1.6)的格式处理一下适配新版本，后续可删
+            if isinstance(task_info[task_id]["reminder_message"], str):
+                task_info[task_id]["reminder_message"] = Message(
+                    task_info[task_id]["reminder_message"]
+                )
             # 检查定时任务是否过时
             if (
                 task_info[task_id]["type"] == "datetime"
@@ -162,18 +167,11 @@ async def load_tasks():
 async def _(event: Event, state: T_State, args: Message = CommandArg()):
     user_ids = ""
     remind_time = None
-    reminder_message = ""
+    reminder_message = Message()
     for msg in args:
         # 时间参数存入，则只需存提醒内容
         if remind_time:
-            if msg.type == "text":
-                reminder_message += msg.data["text"]
-            else:
-                cqmsg = f"[CQ:{msg.type}"
-                for key, value in msg.data.items():
-                    cqmsg += f",{key}={value}"
-                cqmsg += "]"
-                reminder_message += cqmsg
+            reminder_message += msg
             continue
         # 没有传入时间参数，处理at，分割时间和提醒内容
         if msg.type == "at":
@@ -204,6 +202,7 @@ async def _(event: Event, state: T_State, args: Message = CommandArg()):
         else:
             await remind.finish(f"时间输入不正确！type={msg.type},data={msg.data}")
     if user_ids:
+        user_ids = user_ids.replace("qq=0", "qq=all")
         state["user_ids"] = user_ids
     # 否则默认为命令发起者
     else:
@@ -223,7 +222,7 @@ async def _(state: T_State, remind_time: str = ArgStr("remind_time")):
     logger.debug(f"解析提醒时间结果为：{remind_time}")
     if final_time is None:
         await remind.reject(
-            "时间格式不正确。请重新输入或发送“取消”中止交互。\n仅支持以下格式：\n"
+            "时间格式不正确。请重新输入或发送“取消”中止交互。\n可尝试以下格式：\n"
             + "\n".join(time_format)
         )
     state["remind_time"] = final_time
@@ -234,6 +233,7 @@ async def _(state: T_State, remind_time: str = ArgStr("remind_time")):
 async def _(state: T_State, reminder_message: str = ArgStr("reminder_message")):
     if reminder_message.strip().lower() in ["取消", "cancel"]:
         await remind.finish("已取消提醒设置。")
+        reminder_message = Message(reminder_message)
     state["reminder_message"] = reminder_message
 
 
@@ -251,92 +251,91 @@ async def _(event: MessageEvent, state: T_State):
     msg_list = event.message
     user_ids = ""
     remind_time = None
-    remind_message = ""
+    remind_message = Message()
     if msg_list[0].type == "text":
+        # 先处理第一部分
         keymsg = str(msg_list[0]).strip()
-        if "提醒" in keymsg:
-            # 使用split()方法分割字符串
-            # 限制分割次数为1，这样只会在第一个"提醒"处分割
-            parts = keymsg.split("提醒", 1)
-            # 获取第一个"提醒"之前的内容，并存储到变量a中
-            a = parts[0].strip() if parts else ""
-            # 如果存在逗号之后的内容，则获取并存储到变量b中
-            b = parts[1].strip() if len(parts) > 1 else ""
-
-            # 保存时间参数
-            remind_time = await parse_time(a)
-            logger.debug(f"解析提醒时间结果为：{remind_time}")
-            if remind_time is None:
-                state["success"] = False
-                if remind_config.remind_keyword_error:
-                    await remind_keyword.send("关键词【提醒】触发：未匹配到时间")
-                return
-            state["remind_time"] = remind_time
-
-            # 处理用户参数
-            if b == "我和" and len(msg_list) > 1 and msg_list[1].type == "at":
-                # 12.20提醒我和@用户1 @用户2 去吃饭
-                user_ids += f"[CQ:at,qq={event.get_user_id()}] "
-            elif b == "" and len(msg_list) > 1 and msg_list[1].type == "at":
-                # 12.20提醒@用户1 @用户2 去吃饭
-                pass
-            elif b.startswith("我"):
-                # 12.20提醒我去吃饭
-                user_ids += f"[CQ:at,qq={event.get_user_id()}] "
-                remind_message += b[1:]  # 删掉"我"，保留"去吃饭"
-            elif b.startswith("all") or b.startswith("所有人"):
-                # 14.20提醒all去开会
-                user_ids += f"[CQ:at,qq=all] "
-                remind_message += b[3:]  # 删掉"all"或者"所有人"，保留"去开会"
-            else:
-                state["success"] = False
-                if remind_config.remind_keyword_error:
-                    await remind_keyword.send("关键词【提醒】触发：未匹配到提醒人")
-                return
-
-            for i in range(1, len(msg_list)):
-                if remind_message:
-                    # 剩下msg全部作为remind_message
-                    if msg_list[i].type == "text":
-                        remind_message += msg_list[i].data["text"]
-                    else:
-                        cqmsg = f"[CQ:{msg_list[i].type}"
-                        for key, value in msg_list[i].data.items():
-                            cqmsg += f",{key}={value}"
-                        cqmsg += "]"
-                        remind_message += cqmsg
-                    continue
-                # 还有需要at的用户
-                if msg_list[i].type == "at":
-                    atmsg = "[CQ:at"
-                    for key, value in msg_list[i].data.items():
-                        atmsg += f",{key}={value}"
-                    atmsg += "] "
-                    user_ids += atmsg
-                elif msg_list[i].type == "text":
-                    # 忽略at后面紧跟的单空格
-                    if str(msg_list[i]) == " ":
-                        continue
-                    else:
-                        # 组合得到第3个参数：提醒内容
-                        remind_message += msg_list[i].data["text"]
-            if user_ids and remind_message:
-                state["user_ids"] = user_ids
-                state["reminder_message"] = remind_message.strip()
-                state["success"] = True
-            else:
-                state["success"] = False
-                if remind_config.remind_keyword_error:
-                    await remind_keyword.send("关键词【提醒】触发：未匹配到提醒信息")
-
-        else:
+        if "提醒" not in keymsg:
             state["success"] = False
             if remind_config.remind_keyword_error:
                 await remind_keyword.send("关键词【提醒】触发：“提醒”不在正确的位置")
+            return
+
+        # 使用split()方法分割字符串
+        # 限制分割次数为1，这样只会在第一个"提醒"处分割
+        parts = keymsg.split("提醒", 1)
+        # 获取第一个"提醒"之前的内容，并存储到变量a中
+        a = parts[0].strip() if parts else ""
+        # 如果存在逗号之后的内容，则获取并存储到变量b中
+        b = parts[1].strip() if len(parts) > 1 else ""
+
+        # 保存时间参数
+        remind_time = await parse_time(a)
+        logger.debug(f"解析提醒时间结果为：{remind_time}")
+        if remind_time is None:
+            state["success"] = False
+            if remind_config.remind_keyword_error:
+                await remind_keyword.send("关键词【提醒】触发：未匹配到时间")
+            return
+        state["remind_time"] = remind_time
+
+        # 处理用户参数
+        if b == "我和" and len(msg_list) > 1 and msg_list[1].type == "at":
+            # 12.20提醒我和@用户1 @用户2 去吃饭
+            user_ids += f"[CQ:at,qq={event.get_user_id()}] "
+        elif b == "" and len(msg_list) > 1 and msg_list[1].type == "at":
+            # 12.20提醒@用户1 @用户2 去吃饭
+            pass
+        elif b.startswith("我"):
+            # 12.20提醒我去吃饭
+            user_ids += f"[CQ:at,qq={event.get_user_id()}] "
+            remind_message += b[1:]  # 删掉"我"，保留"去吃饭"
+        elif b.startswith("all") or b.startswith("所有人"):
+            # 14.20提醒all去开会
+            user_ids += f"[CQ:at,qq=all] "
+            remind_message += b[3:]  # 删掉"all"或者"所有人"，保留"去开会"
+        else:
+            state["success"] = False
+            if remind_config.remind_keyword_error:
+                await remind_keyword.send("关键词【提醒】触发：未匹配到提醒人")
+            return
     else:
         state["success"] = False
         if remind_config.remind_keyword_error:
             await remind_keyword.send("关键词【提醒】触发：消息应当以文本开头")
+        return
+
+    # 接下来处理后面的部分，即[1:]
+    if remind_message:
+        # 剩下msg全部作为remind_message
+        remind_message += msg_list[1:]
+    else:
+        # 先看看还有没有[CQ:at]
+        for i in range(1, len(msg_list)):
+            if msg_list[i].type == "at":
+                atmsg = "[CQ:at"
+                for key, value in msg_list[i].data.items():
+                    atmsg += f",{key}={value}"
+                atmsg += "] "
+                user_ids += atmsg
+            elif msg_list[i].type == "text":
+                # 忽略at后面紧跟的单空格
+                if str(msg_list[i]) == " ":
+                    continue
+                else:
+                    # 后面的全是提醒内容
+                    remind_message += msg_list[i:]
+
+    if user_ids and remind_message:
+        # [CQ:at,qq=0,name=@全体成员] 应替换成 [CQ:at,qq=all,name=@全体成员]
+        user_ids = user_ids.replace("qq=0", "qq=all")
+        state["user_ids"] = user_ids
+        state["reminder_message"] = remind_message
+        state["success"] = True
+    else:
+        state["success"] = False
+        if remind_config.remind_keyword_error:
+            await remind_keyword.send("关键词【提醒】触发：未匹配到提醒信息")
 
 
 @remind_keyword.handle()
@@ -363,7 +362,7 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
             user_tasks = get_user_tasks(reminder_user_id, group_id, True)
             for task in user_tasks:
                 task_id = task["task_id"]
-                rmsg = task["reminder_message"]
+                rmsg = str(task["reminder_message"])
                 job = scheduler.get_job(task_id)
                 if job:
                     job.remove()
@@ -406,24 +405,22 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
             if index < 0 or index >= len(user_tasks):
                 raise ValueError("任务ID超出范围")
             task_id = user_tasks[index]["task_id"]
+            str_msg = str(user_tasks[index]["reminder_message"])
             job = scheduler.get_job(task_id)
-            msg = cq_to_at(
-                user_tasks[index]["user_ids"] + user_tasks[index]["reminder_message"]
-            )
+            msg = cq_to_at(user_tasks[index]["user_ids"] + str_msg)
             if job:
                 job.remove()
-                info = (
-                    user_tasks[index]["reminder_message"]
-                    if len(user_tasks[index]["reminder_message"]) <= 20
-                    else user_tasks[index]["reminder_message"][:20] + "..."
-                )
+                info = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
                 logger.success(f"成功删除提醒[{task_id}]:{repr(info)}")
                 del task_info[task_id]
                 msg_list.append(f"{index+1:02d}  {msg}")
             else:
                 raise RuntimeError(f"任务{index+1:02d}不存在或已被删除。")
         msgs = "\n\n".join(msg_list)
-        await del_remind.send(Message("成功删除以下提醒任务！\n" + msgs))
+        try:
+            await del_remind.send(Message("成功删除以下提醒任务！\n" + msgs))
+        except Exception:
+            await del_remind.send("成功删除以下提醒任务！(raw)\n" + msgs)
         save_tasks_to_file()  # 更新任务信息到文件
     except ValueError as e:
         await del_remind.send(f'任务ID"{id}"参数错误：{e}')
@@ -446,12 +443,15 @@ async def list_reminds_handler(event: Event, args: Message = CommandArg()):
             remind_time = task["remind_time"].strftime("%Y/%m/%d %H:%M")
             msg = f"{index:02d} 时间: {remind_time}, 内容: "
             user_ids = task["user_ids"]
-            reminder_message = task["reminder_message"]
+            reminder_message = str(task["reminder_message"])
             # 将其中的at改为纯文本，避免打扰别人
             msg += cq_to_at(user_ids + reminder_message)
             msg_list.append(msg)
         msgs = "\n\n".join(msg_list)
-        await list_reminds.send(Message("您的提醒任务列表:\n" + msgs))
+        try:
+            await list_reminds.send(Message("您的提醒任务列表:\n" + msgs))
+        except Exception:
+            await list_reminds.send("您的提醒任务列表(raw):\n" + msgs)
     else:
         await list_reminds.send("您目前没有设置任何提醒任务。")
 
@@ -471,7 +471,7 @@ async def del_cron_remind_handler(event: Event, args: Message = CommandArg()):
             user_tasks = get_user_cron_tasks(reminder_user_id, group_id)
             for task in user_tasks:
                 task_id = task["task_id"]
-                rmsg = task["reminder_message"]
+                rmsg = str(task["reminder_message"])
                 job = scheduler.get_job(task_id)
                 if job:
                     job.remove()
@@ -509,24 +509,22 @@ async def del_cron_remind_handler(event: Event, args: Message = CommandArg()):
             if index < 0 or index >= len(user_tasks):
                 raise ValueError("任务ID超出范围")
             task_id = user_tasks[index]["task_id"]
+            str_msg = str(user_tasks[index]["reminder_message"])
             job = scheduler.get_job(task_id)
-            msg = cq_to_at(
-                user_tasks[index]["user_ids"] + user_tasks[index]["reminder_message"]
-            )
+            msg = cq_to_at(user_tasks[index]["user_ids"] + str_msg)
             if job:
                 job.remove()
-                info = (
-                    user_tasks[index]["reminder_message"]
-                    if len(user_tasks[index]["reminder_message"]) <= 20
-                    else user_tasks[index]["reminder_message"][:20] + "..."
-                )
+                info = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
                 logger.success(f"成功删除循环提醒[{task_id}]:{repr(info)}")
                 del task_info[task_id]
                 msg_list.append(f"{index+1:02d}  {msg}")
             else:
                 raise RuntimeError(f"任务{index+1:02d}不存在或已被删除。")
         msgs = "\n\n".join(msg_list)
-        await del_cron_remind.send(Message("成功删除以下循环提醒任务！\n" + msgs))
+        try:
+            await del_cron_remind.send(Message("成功删除以下循环提醒任务！\n" + msgs))
+        except Exception:
+            await del_cron_remind.send("成功删除以下循环提醒任务！(raw)\n" + msgs)
         save_tasks_to_file()  # 更新任务信息到文件
     except ValueError as e:
         await del_cron_remind.send(f'任务ID"{id}"参数错误：{e}')
@@ -547,11 +545,14 @@ async def list_cron_reminds_handler(event: Event):
             remind_time = task["remind_time"]
             msg = f"{index:02d} 时间: {colloquial_time(remind_time)}, 内容: "
             user_ids = task["user_ids"]
-            reminder_message = task["reminder_message"]
+            reminder_message = str(task["reminder_message"])
             # 将其中的at改为纯文本，避免打扰别人
             msg += cq_to_at(user_ids + reminder_message)
             msg_list.append(msg)
         msgs = "\n\n".join(msg_list)
-        await list_cron_reminds.send(Message("您的循环提醒任务列表:\n" + msgs))
+        try:
+            await list_cron_reminds.send(Message("您的循环提醒任务列表:\n" + msgs))
+        except Exception:
+            await list_cron_reminds.send("您的循环提醒任务列表(raw):\n" + msgs)
     else:
         await list_cron_reminds.send("您目前没有设置任何循环提醒任务。")
