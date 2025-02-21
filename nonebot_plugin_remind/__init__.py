@@ -233,7 +233,7 @@ async def _(state: T_State, remind_time: str = ArgStr("remind_time")):
 async def _(state: T_State, reminder_message: str = ArgStr("reminder_message")):
     if reminder_message.strip().lower() in ["取消", "cancel"]:
         await remind.finish("已取消提醒设置。")
-        reminder_message = Message(reminder_message)
+    reminder_message = Message(reminder_message)
     state["reminder_message"] = reminder_message
 
 
@@ -325,6 +325,11 @@ async def _(event: MessageEvent, state: T_State):
                 else:
                     # 后面的全是提醒内容
                     remind_message += msg_list[i:]
+                    break
+            else:
+                # 后面的全是提醒内容
+                remind_message += msg_list[i:]
+                break
 
     if user_ids and remind_message:
         # [CQ:at,qq=0,name=@全体成员] 应替换成 [CQ:at,qq=all,name=@全体成员]
