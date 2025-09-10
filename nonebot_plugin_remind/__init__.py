@@ -11,6 +11,7 @@ from nonebot.plugin import PluginMetadata
 from nonebot.typing import T_State
 from nonebot.params import CommandArg, ArgStr
 from nonebot.permission import SUPERUSER
+from nonebot.exception import FinishedException
 from nonebot.rule import to_me, Rule
 from nonebot.log import logger
 
@@ -90,20 +91,28 @@ next_remind = on_command("next_remind",aliases={"nr","下次提醒"}, rule=priva
 
 @next_remind.handle()
 async def _():
-    jobs = scheduler.get_jobs()
-    
-    if not jobs:
-        await next_remind.finish("已经没有提醒任务啦！")
-    # 过滤掉没有next_run_time的作业（例如已暂停的作业）
-    valid_jobs = [job for job in jobs if job.next_run_time is not None]
-    if not valid_jobs:
-        await next_remind.finish("已经没有提醒任务啦！")
-    
-    # 按next_run_time排序，找到最早的执行时间
-    next_job = min(valid_jobs, key=lambda job: job.next_run_time)
-    msg = task_info[next_job.id]["reminder_message"]
-    await next_remind.send(f"下次提醒时间：\n{colloquial_time(next_job.next_run_time)}\n提醒内容：\n"+msg)
-
+    try:
+        jobs = scheduler.get_jobs()
+        
+        if not jobs:
+            await next_remind.finish("已经没有定时任务啦！")
+        # 过滤掉没有next_run_time的作业（例如已暂停的作业）
+        valid_jobs = [job for job in jobs if job.next_run_time is not None]
+        if not valid_jobs:
+            await next_remind.finish("已经没有定时任务啦！")
+        
+        # 按next_run_time排序，找到最早的执行时间
+        next_job = min(valid_jobs, key=lambda job: job.next_run_time)
+        if next_job.id in task_info.keys():
+            msg = task_info[next_job.id]["reminder_message"]
+            await next_remind.send(f"下次提醒时间：\n{colloquial_time(next_job.next_run_time)}\n提醒内容：\n"+msg)
+        else:
+            await next_remind.send(f"下次定时任务：\n{colloquial_time(next_job.next_run_time)}\n（不是由本插件提供的定时提醒服务）")
+    except FinishedException:
+        pass
+    except Exception as e:
+        logger.error(e)
+        await next_remind.send(f"{type(e).__name__}: {e}")
 
 
 # 在机器人启动时加载任务信息
