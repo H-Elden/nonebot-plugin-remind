@@ -2,6 +2,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import (
     Message,
     GroupMessageEvent,
+    PrivateMessageEvent,
     Event,
     MessageEvent,
 )
@@ -9,7 +10,8 @@ from nonebot import require, on_command, get_driver, on_keyword
 from nonebot.plugin import PluginMetadata
 from nonebot.typing import T_State
 from nonebot.params import CommandArg, ArgStr
-from nonebot.rule import to_me
+from nonebot.permission import SUPERUSER
+from nonebot.rule import to_me, Rule
 from nonebot.log import logger
 
 require("nonebot_plugin_apscheduler")
@@ -65,6 +67,14 @@ if scheduler is None:
         "Scheduler not initialized. Please check your plugin configuration."
     )
 
+def private_checker():
+    """是否为私聊发送消息"""
+
+    async def _checker(event: Event) -> bool:
+        return isinstance(event, PrivateMessageEvent)
+
+    return Rule(_checker)
+
 # 创建命令处理器
 remind = on_command("remind", aliases={"提醒"}, priority=5, block=True)
 remind_keyword = on_keyword({"提醒"}, rule=to_me(), priority=6, block=True)
@@ -76,6 +86,24 @@ list_reminds = on_command(
 )
 del_cron_remind = on_command("drc", aliases={"删除循环提醒"}, priority=5, block=True)
 list_cron_reminds = on_command("lrc", aliases={"循环提醒列表"}, priority=5, block=True)
+next_remind = on_command("next_remind",aliases={"nr","下次提醒"}, rule=private_checker(), permission=SUPERUSER, priority=5, block=True)
+
+@next_remind.handle()
+async def _():
+    jobs = scheduler.get_jobs()
+    
+    if not jobs:
+        await next_remind.finish("已经没有提醒任务啦！")
+    # 过滤掉没有next_run_time的作业（例如已暂停的作业）
+    valid_jobs = [job for job in jobs if job.next_run_time is not None]
+    if not valid_jobs:
+        await next_remind.finish("已经没有提醒任务啦！")
+    
+    # 按next_run_time排序，找到最早的执行时间
+    next_job = min(valid_jobs, key=lambda job: job.next_run_time)
+    msg = task_info[next_job.id]["reminder_message"]
+    await next_remind.send(f"下次提醒时间：\n{colloquial_time(next_job.next_run_time)}\n提醒内容：\n"+msg)
+
 
 
 # 在机器人启动时加载任务信息
