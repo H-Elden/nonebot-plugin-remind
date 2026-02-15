@@ -1,173 +1,286 @@
-import re
-import ast
-from datetime import datetime, timedelta
-from apscheduler.triggers.cron import CronTrigger
-from .glm4 import parsed_datetime_glm4, parsed_cron_time_glm4
-from .common import time_format
+"""中文自然语言时间解析模块。
 
+使用 jionlp 离线解析中文时间表达式，GLM-4 作为可选兜底。
+"""
+
+from __future__ import annotations
+
+import ast
+import os
+import sys
+import time as _time
+from datetime import datetime, timedelta
+
+# jionlp 在 import 时会 print 推广信息，屏蔽 stdout
+_devnull = open(os.devnull, "w")
+_stdout = sys.stdout
+sys.stdout = _devnull
+try:
+    import jionlp as jio
+finally:
+    sys.stdout = _stdout
+    _devnull.close()
+
+from apscheduler.triggers.cron import CronTrigger
 from nonebot.log import logger
 
+from .glm4 import parsed_cron_time_glm4, parsed_datetime_glm4
 
-# 月份与最大天数字典（不考虑闰年精确计算）
-MONTH_MAX_DAYS = {
-    1: 31,
-    2: 29,  # 允许闰日（实际校验时会接受2月29日）
-    3: 31,
-    4: 30,
-    5: 31,
-    6: 30,
-    7: 31,
-    8: 31,
-    9: 30,
-    10: 31,
-    11: 30,
-    12: 31,
-}
+_DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 
-async def parse_time(remind_time: str) -> datetime | CronTrigger | None:
+# ── 公开接口 ────────────────────────────────────────────────
+
+
+async def parse_time(text: str) -> datetime | CronTrigger | None:
+    """解析中文时间表达式。
+
+    Returns:
+        datetime    — 单次提醒
+        CronTrigger — 循环提醒
+        None        — 无法解析
+    """
+    if not text or not text.strip():
+        return None
+
+    # 1. jionlp 离线解析
+    result = _parse_with_jionlp(text)
+    if result is not None:
+        return result
+
+    # 2. GLM-4 兜底
     try:
-        # 把循环提醒时间解析为CronTrigger
-        if remind_time.startswith("每"):
-            return await parse_cron_trigger(remind_time)
-        # 把单次提醒时间解析为datetime
-        else:
-            return await parse_date_trigger(remind_time)
-    except ValueError as e:
-        logger.error(e)
+        if text.startswith("每"):
+            return await _parse_cron_with_glm4(text)
+        return await _parse_date_with_glm4(text)
+    except Exception as e:
+        logger.error(f"GLM-4 解析异常: {e}")
         return None
 
 
-async def parse_date_trigger(time: str) -> datetime | None:
-    """将提醒时间str解析为datetime"""
-    logger.info(f'解析单次提醒时间:"{time}"')
-    now = datetime.now()
-    final_time = None
+async def extract_time_and_message(
+    text: str,
+) -> tuple[datetime | CronTrigger | None, str]:
+    """从混合文本中提取时间和剩余消息。
 
-    # 将可能的分隔符 " ", "-", ":", "：" 替换为 "."
-    result_string = (
-        time.replace(" ", ".").replace("-", ".").replace(":", ".").replace("：", ".")
-    )
+    利用 jio.ner.extract_time 精确定位时间子串的位置，
+    将其从原文中移除后得到剩余消息。
 
-    # 尝试解析不同格式的时间
-    for fmt in time_format:
+    示例:
+        "明天打胶"   → (datetime(明天), "打胶")
+        "一分钟后开会" → (datetime(一分钟后), "开会")
+        "下午3点交作业" → (datetime(下午3点), "交作业")
+
+    Returns:
+        (parsed_time, remaining_message)
+        若无法识别时间，返回 (None, 原始text)
+    """
+    if not text or not text.strip():
+        return None, text
+
+    # 使用 jio.ner.extract_time 获取带位置信息的时间实体
+    try:
+        entities = jio.ner.extract_time(text, time_base=_time.time())
+    except Exception as e:
+        logger.debug(f"jionlp extract_time 异常: {e}")
+        return None, text
+
+    if not entities:
+        # jionlp 提取不到，尝试 GLM-4 兜底（此时无法分离消息）
+        parsed = await parse_time(text)
+        return parsed, "" if parsed else text
+
+    # 取第一个时间实体
+    entity = entities[0]
+    time_text = entity["text"]
+    offset = entity["offset"]  # [start, end]
+
+    # 解析时间
+    parsed = await parse_time(time_text)
+    if parsed is None:
+        return None, text
+
+    # 从原文中移除时间部分，得到剩余消息
+    remaining = (text[: offset[0]] + text[offset[1] :]).strip()
+    return parsed, remaining
+
+
+# ── jionlp 解析 ─────────────────────────────────────────────
+
+
+def _parse_with_jionlp(text: str) -> datetime | CronTrigger | None:
+    """使用 jionlp 解析时间表达式。"""
+    try:
+        result = jio.parse_time(text, time_base=_time.time())
+    except Exception as e:
+        logger.debug(f"jionlp 解析异常: {e}")
+        return None
+
+    if result is None:
+        return None
+
+    time_type = result.get("type")
+    time_data = result.get("time")
+    logger.debug(f"jionlp 原始结果: type={time_type}, time={time_data}")
+
+    if not isinstance(time_type, str):
+        return None
+
+    converter = {
+        "time_point": _parse_timestamp,
+        "time_span": _parse_timestamp,
+        "time_delta": _delta_to_datetime,
+        "time_period": _period_to_cron,
+    }.get(time_type)
+
+    if converter is None:
+        logger.warning(f"不支持的 jionlp 时间类型: {time_type}")
+        return None
+
+    parsed = converter(time_data)
+    if parsed is not None:
+        logger.info(f'jionlp 解析: "{text}" → {parsed}')
+    return parsed
+
+
+# ── 类型转换 ─────────────────────────────────────────────────
+
+
+def _parse_timestamp(data: list) -> datetime | None:
+    """time_point / time_span → datetime（取起始时间）。
+
+    data 格式: ['2026-03-15 15:00:00', '2026-03-15 15:00:00']
+    """
+    try:
+        return datetime.strptime(data[0], _DATETIME_FMT)
+    except (IndexError, ValueError, TypeError):
+        return None
+
+
+def _delta_to_datetime(data) -> datetime | None:
+    """time_delta → now + timedelta。
+
+    data 格式: {'hour': 0.5} 或 [{'hour': 0.5}, {'hour': 1.0}]（模糊范围取首值）
+    """
+    try:
+        if isinstance(data, list):
+            data = data[0] if data else {}
+
+        mapping = {
+            "day": "days",
+            "hour": "hours",
+            "minute": "minutes",
+            "second": "seconds",
+        }
+        kwargs: dict[str, float] = {}
+        for src, dst in mapping.items():
+            if src in data:
+                kwargs[dst] = float(data[src])
+
+        # month / year 不被 timedelta 直接支持，用近似天数
+        if "month" in data:
+            kwargs["days"] = kwargs.get("days", 0) + float(data["month"]) * 30
+        if "year" in data:
+            kwargs["days"] = kwargs.get("days", 0) + float(data["year"]) * 365
+
+        return datetime.now() + timedelta(**kwargs) if kwargs else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _period_to_cron(data: dict) -> CronTrigger | None:
+    """time_period → CronTrigger。
+
+    data 格式: {'delta': {'day': 1}, 'point': {'time': [...], 'string': '...'}}
+    """
+    try:
+        delta = data.get("delta", {})
+        point = data.get("point")
+
+        if not delta:
+            return None
+
+        pt = _extract_point_time(point)
+        if pt is None:
+            return None
+
+        params = _build_cron_params(delta, pt)
+        return CronTrigger(**params) if params else None
+    except (TypeError, ValueError) as e:
+        logger.debug(f"time_period → CronTrigger 失败: {e}")
+        return None
+
+
+def _extract_point_time(point: dict | None) -> datetime | None:
+    """从 time_period.point 中提取 datetime。"""
+    if not point or "time" not in point:
+        return None
+    try:
+        return datetime.strptime(point["time"][0], _DATETIME_FMT)
+    except (IndexError, ValueError):
+        return None
+
+
+def _build_cron_params(delta: dict, pt: datetime) -> dict:
+    """根据 delta 类型和 point 时间构建 CronTrigger 参数。"""
+    if "hour" in delta:
+        # 每小时的 XX 分
+        return {"minute": pt.minute}
+
+    if "day" in delta:
+        day_val = int(delta["day"])
+        if day_val == 1:
+            # 每天
+            return {"hour": pt.hour, "minute": pt.minute}
+        if day_val == 7:
+            # 每周（weekday: 0=Mon … 6=Sun，与 APScheduler 一致）
+            return {
+                "day_of_week": pt.weekday(),
+                "hour": pt.hour,
+                "minute": pt.minute,
+            }
+        logger.warning(f"不支持每 {day_val} 天的 Cron 周期")
+        return {}
+
+    if "month" in delta:
+        # 每月
+        return {"day": pt.day, "hour": pt.hour, "minute": pt.minute}
+
+    if "year" in delta:
+        # 每年
+        return {
+            "month": pt.month,
+            "day": pt.day,
+            "hour": pt.hour,
+            "minute": pt.minute,
+        }
+
+    return {}
+
+
+# ── GLM-4 兜底 ──────────────────────────────────────────────
+
+
+async def _parse_date_with_glm4(text: str) -> datetime | None:
+    """GLM-4 解析单次提醒时间。"""
+    logger.info(f'GLM-4 解析单次提醒: "{text}"')
+    res = await parsed_datetime_glm4(text)
+    if isinstance(res, str) and res not in ("None", "Error", "Failed", "Timeout"):
         try:
-            final_time = datetime.strptime(result_string, fmt)
-            break
+            return datetime.strptime(res, "%Y-%m-%d %H:%M")
         except ValueError:
-            continue
-
-    if final_time:
-        # 调整时间格式
-        if fmt == "%m.%d.%H.%M":
-            final_time = final_time.replace(year=now.year)
-            if final_time <= now:
-                final_time = final_time.replace(year=now.year + 1)
-        elif fmt == "%H.%M":
-            final_time = final_time.replace(year=now.year, month=now.month, day=now.day)
-            # 找到距离当前时间最近的未来的这个时间点，也就是如果今天已经过了这个时间点，就定时到明天
-            if final_time <= now:
-                final_time += timedelta(days=1)
-
-    # 使用GLM-4的大语言模型解析时间
-    else:
-        res = await parsed_datetime_glm4(time)
-        if res != "None" and res != "Error":
-            final_time = datetime.strptime(res, "%Y-%m-%d %H:%M")
-
-    return final_time
+            pass
+    return None
 
 
-def validate_date_params(params: dict):
-    """验证月份和日期的组合有效性"""
-    if "month" in params and "day" in params:
-        month = params["month"]
-        day = params["day"]
-        if day > MONTH_MAX_DAYS.get(month, 31):
-            raise ValueError(f"无效的日期：{month}月没有{day}日")
-
-
-async def parse_cron_trigger(time: str) -> CronTrigger:
-    logger.info(f'解析循环提醒时间:"{time}"')
-    # 正则匹配可能的时间表述
-    patterns = [
-        (r"每个?小?时的?(\d{1,2})分?", ["minute"]),
-        (r"每天的?(\d{1,2})[：:.点](\d{1,2})分?", ["hour", "minute"]),
-        (
-            r"每个?月的?(\d{1,2})[号日.]的?(\d{1,2})[：:.点](\d{1,2})分?",
-            ["day", "hour", "minute"],
-        ),
-        (
-            r"每个?年的?(\d{1,2})[月.](\d{1,2})[号日.]的?(\d{1,2})[：:.点](\d{1,2})分?",
-            ["month", "day", "hour", "minute"],
-        ),
-        (
-            r"每个?(?:周|星期|礼拜)的?([一二三四五六七日天]+)的?(\d{1,2})[：:.点](\d{1,2})分?",
-            ["day_of_week", "hour", "minute"],
-        ),
-    ]
-
-    for pattern, fields in patterns:
-        match = re.search(pattern, time)
-        if match:
-            params = {}
-            for idx, field in enumerate(fields):
-                value_str = match.group(idx + 1)
-
-                if field == "day_of_week":
-                    # 中文星期转换逻辑（保持不变）
-                    converted = []
-                    for char in value_str:
-                        num = {
-                            "日": 6,
-                            "天": 6,
-                            "七": 6,
-                            "一": 0,
-                            "二": 1,
-                            "三": 2,
-                            "四": 3,
-                            "五": 4,
-                            "六": 5,
-                        }.get(char)
-                        if num is None:
-                            raise ValueError(f"无效的星期字符: {char}")
-                        converted.append(str(num))
-                    params[field] = ",".join(converted)
-                else:
-                    # 数值型字段校验
-                    value = int(value_str)
-                    validation_rules = {
-                        "hour": (0, 23),
-                        "minute": (0, 59),
-                        "day": (1, 31),
-                        "month": (1, 12),
-                    }
-                    if field in validation_rules:
-                        min_val, max_val = validation_rules[field]
-                        if not (min_val <= value <= max_val):
-                            raise ValueError(f"无效的{field}值: {value}")
-                    params[field] = value
-
-            # 日期组合校验
-            validate_date_params(params)
-
-            logger.debug(
-                "正则解析参数为" + ", ".join(f"{k}={v}" for k, v in params.items())
-            )
+async def _parse_cron_with_glm4(text: str) -> CronTrigger | None:
+    """GLM-4 解析循环提醒时间。"""
+    logger.info(f'GLM-4 解析循环提醒: "{text}"')
+    params_str = await parsed_cron_time_glm4(text)
+    try:
+        params = ast.literal_eval(params_str)
+        if isinstance(params, dict):
             return CronTrigger(**params)
-
-    # 无法使用正则表达式解析，采用glm-4模型解析
-    params_str = await parsed_cron_time_glm4(time)
-    params = ast.literal_eval(params_str)
-    if isinstance(params, dict):
-        return CronTrigger(**params)
-    else:
-        raise ValueError(f"无法解析循环时间{time}")
-
-
-if __name__ == "__main__":
-    test = ["每天13点30", "每小时30分", "每年12月3号15.22", "每周三14.00"]
-
-    for s in test:
-        res = parse_cron_trigger(s)
-        print(res)
+    except (ValueError, SyntaxError):
+        pass
+    return None

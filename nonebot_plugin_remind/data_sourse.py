@@ -1,19 +1,22 @@
+from __future__ import annotations
+
+import random
+from datetime import datetime, timedelta
+
 import nonebot
 from nonebot.adapters.onebot.v11 import (
-    Message,
-    GroupMessageEvent,
-    MessageSegment,
     Event,
+    GroupMessageEvent,
+    Message,
+    MessageSegment,
 )
-from nonebot_plugin_apscheduler import scheduler
-from datetime import datetime, timedelta
-from nonebot.typing import T_State
 from nonebot.log import logger
-import random
+from nonebot.typing import T_State
+from nonebot_plugin_apscheduler import scheduler
 
+from .colloquial import colloquial_time
 from .common import task_info
 from .utils import save_tasks_to_file
-from .colloquial import colloquial_time
 
 
 async def set_date_reminder(event: Event, state: T_State):
@@ -55,7 +58,7 @@ async def set_date_reminder(event: Event, state: T_State):
     task_id = job.id
     # 更新定时任务参数，将任务ID传递进去
     job.modify(args=[task_id, user_ids, reminder_message, is_group, group_id])
-    logger.success(f'成功设置提醒任务:{remind_time.strftime("%Y-%m-%d %H:%M:%S")}')
+    logger.success(f"成功设置提醒任务:{remind_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # 获取任务发起者（提醒人）的ID
     reminder_user_id = event.get_user_id()
@@ -147,11 +150,16 @@ async def set_reminder(event: Event, state: T_State):
         + MessageSegment.face(random.choice(face_id))
     )
     # 计数，at几个人
-    id_num = user_ids.count("at")
+    at_segments = [seg for seg in user_ids if seg.type == "at"]
+    id_num = len(at_segments)
     pron = ""
-    if "all" in user_ids:
+    has_all = any(str(seg.data.get("qq")) == "all" for seg in at_segments)
+    has_self = any(
+        str(seg.data.get("qq")) == event.get_user_id() for seg in at_segments
+    )
+    if has_all:
         pron = "你们"
-    elif event.get_user_id() in user_ids:
+    elif has_self:
         pron = "你们" if id_num > 1 else "你"
     else:
         pron = "他们" if id_num > 1 else "他"
@@ -168,27 +176,27 @@ async def set_reminder(event: Event, state: T_State):
 # 定义定时提醒函数
 async def send_reminder(
     task_id: str,
-    user_ids: str,
+    user_ids: Message,
     reminder_message: Message,
     is_group: bool = False,
-    group_id: int = None,
+    group_id: int | None = None,
 ):
     bot = nonebot.get_bot()
     str_msg = str(reminder_message)
     if is_group:
-        message = Message(user_ids) + reminder_message
+        message = user_ids + reminder_message
         try:
             await bot.send_group_msg(group_id=group_id, message=message)
         except Exception as e:
             await bot.send_group_msg(
                 group_id=group_id,
-                message=Message(user_ids) + f"\n{type(e).__name__}: {e}\n{str_msg}",
+                message=user_ids + f"\n{type(e).__name__}: {e}\n{str_msg}",
             )
     else:
         # 发送提醒信息到私聊，私聊时group_id即为用户qq号
         try:
             await bot.send_private_msg(user_id=group_id, message=reminder_message)
-        except Exception:
+        except Exception as e:
             await bot.send_private_msg(
                 user_id=group_id, message=f"\n{type(e).__name__}: {e}\n{str_msg}"
             )
@@ -197,5 +205,5 @@ async def send_reminder(
     if task_id in task_info and task_info[task_id]["type"] == "datetime":
         del task_info[task_id]
         msg = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
-        logger.success(f"成功发送提醒[{task_id}]:{repr(msg)}")
+        logger.success(f"成功发送提醒[{task_id}]:{msg!r}")
         save_tasks_to_file()  # 更新任务信息到文件

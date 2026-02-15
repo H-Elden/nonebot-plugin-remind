@@ -1,11 +1,13 @@
-import re
-import json
-import jsonpickle
-from nonebot.log import logger
-from datetime import datetime, timedelta
-from typing import Optional
+from __future__ import annotations
 
-from .common import task_info, TASKS_FILE
+import json
+from datetime import timedelta
+
+import jsonpickle
+from nonebot.adapters.onebot.v11 import Message
+from nonebot.log import logger
+
+from .common import TASKS_FILE, task_info
 from .config import remind_config
 
 
@@ -25,28 +27,31 @@ def save_tasks_to_file():
     将当前提醒任务保存到本地文件
     """
     with open(TASKS_FILE, "w", encoding="utf-8") as f:
-        f.write(jsonpickle.encode(task_info, indent=4))
+        f.write(str(jsonpickle.encode(task_info, indent=4)))
     logger.info(f"提醒任务文件已保存到 {TASKS_FILE}")
 
 
-def cq_to_at(s: str):
+def at_to_text(user_ids: Message) -> str:
+    """将 at 消息段转换为纯文本，用于展示（避免打扰被 at 的人）。
+
+    MessageSegment.at(12345) → "[at 你]"
+    MessageSegment.at("all") → "[at 全体成员]"
+    如有 name 字段则使用 name。
     """
-    将CQ码中at的部分转换成纯文本
-    """
-    # 第一种情况：[CQ:at,qq=数字,name=文字]的模式
-    pattern1 = r"\[CQ:at,qq=\d+,name=@?(.*?)\]"
-    # 使用正则表达式替换匹配到的CQ码
-    replaced_string = re.sub(pattern1, r"[at \1]", s)
-
-    # 第二种情况：匹配at全体成员
-    pattern2 = r"\[CQ:at,qq=all\]"
-    replaced_string = re.sub(pattern2, r"[at 全体成员]", replaced_string)
-
-    # 第三种情况：匹配at你（没有name=文字就说明是@发送者本人
-    pattern2 = r"\[CQ:at,qq=\d+\]"
-    replaced_string = re.sub(pattern2, r"[at 你]", replaced_string)
-
-    return replaced_string
+    parts = []
+    for seg in user_ids:
+        if seg.type == "at":
+            qq = seg.data.get("qq")
+            name = seg.data.get("name", "").lstrip("@")
+            if str(qq) == "all":
+                parts.append("[at 全体成员]")
+            elif name:
+                parts.append(f"[at {name}]")
+            else:
+                parts.append("[at 你]")
+        else:
+            parts.append(str(seg))
+    return "".join(parts)
 
 
 def format_timedelta(td: timedelta):
@@ -67,7 +72,7 @@ def format_timedelta(td: timedelta):
     return "".join(parts) or f"{int(td.total_seconds())}秒"
 
 
-def get_user_tasks(user_id: str, group_id: Optional[int], sort: bool) -> list[dict]:
+def get_user_tasks(user_id: str, group_id: int | None, sort: bool) -> list[dict]:
     """从全局变量task_info获取用户的单次提醒任务
 
     参数：
@@ -103,7 +108,7 @@ def get_user_tasks(user_id: str, group_id: Optional[int], sort: bool) -> list[di
     return user_tasks
 
 
-def get_user_cron_tasks(user_id: str, group_id: Optional[int]) -> list[dict]:
+def get_user_cron_tasks(user_id: str, group_id: int | None) -> list[dict]:
     """从全局变量task_info获取用户的循环提醒任务
 
     参数：
