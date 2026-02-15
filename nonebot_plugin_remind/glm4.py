@@ -1,11 +1,16 @@
+# pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportReturnType=false
 import asyncio
+import warnings
 from datetime import datetime
-from zhipuai import ZhipuAI
 
 from nonebot.log import logger
 
-from .config import remind_config
+# zhipuai 导入时会触发 Pydantic V1 兼容性 UserWarning，屏蔽
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning, module="zhipuai")
+    from zhipuai import ZhipuAI
 
+from .config import remind_config
 
 GLM_4_MODEL = remind_config.glm_4_model
 GLM_4_MODEL_CRON = remind_config.glm_4_model_cron
@@ -113,14 +118,3 @@ async def parsed_cron_time_glm4(time_text: str) -> str:
         get_cnt += 1
 
     return "Timeout"
-
-
-async def main():
-    time_text = input("输入要解析的时间文本：")
-    result = await parsed_datetime_glm4(time_text)
-    print("解析结果为：", result)
-
-
-if __name__ == "__main__":
-    # 运行主函数
-    asyncio.run(main())

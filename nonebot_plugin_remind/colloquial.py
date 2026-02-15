@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+
 from apscheduler.triggers.cron import CronTrigger
 
 
@@ -68,7 +69,7 @@ def colloquial_datetime(remind_time: datetime) -> str:
 
     # 格式化时间，只显示小时和分钟，12小时制
     if remind_time.hour > 12:
-        time_str = f"{remind_time.hour-12}点"
+        time_str = f"{remind_time.hour - 12}点"
     else:
         time_str = f"{remind_time.hour}点"
 
@@ -108,7 +109,7 @@ def colloquial_crontrigger(trigger: CronTrigger) -> str:
         "sat": "六",
     }
 
-    def parse_field(field, value):
+    def parse_field(field: str, value: str) -> str:
         # 处理星期字段
         if field == "day_of_week":
             if "-" in value:
