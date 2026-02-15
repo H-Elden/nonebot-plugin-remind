@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 
 import jsonpickle
+import nonebot
 from nonebot.adapters.onebot.v11 import Message
 from nonebot.log import logger
 
@@ -31,12 +32,26 @@ def save_tasks_to_file():
     logger.info(f"提醒任务文件已保存到 {TASKS_FILE}")
 
 
-def at_to_text(user_ids: Message) -> str:
+async def get_user_nickname(group_id: int, user_id: int) -> str:
+    """获取用户昵称"""
+    try:
+        bot = nonebot.get_bot()
+        result = await bot.call_api("get_group_member_list", group_id=group_id)
+        logger.debug(result)
+        for member in result:
+            if member["user_id"] == user_id:
+                return member["card"] or member["nickname"] or member["user_id"]
+    except Exception as e:
+        logger.error(f"获取用户昵称失败: {e}")
+    return "未知用户"
+    
+
+
+async def at_to_text(group_id: int, user_ids: Message) -> str:
     """将 at 消息段转换为纯文本，用于展示（避免打扰被 at 的人）。
 
-    MessageSegment.at(12345) → "[at 你]"
-    MessageSegment.at("all") → "[at 全体成员]"
-    如有 name 字段则使用 name。
+    由于QQ版本更新，本项目现不仅仅采用CQ码获取昵称。
+    使用 API 调用获取用户昵称，如果获取失败则显示用户 id。
     """
     parts = []
     for seg in user_ids:
@@ -47,8 +62,11 @@ def at_to_text(user_ids: Message) -> str:
                 parts.append("[at 全体成员]")
             elif name:
                 parts.append(f"[at {name}]")
+            elif group_id is None:
+                parts.append(f"[私聊]")
             else:
-                parts.append("[at 你]")
+                name = await get_user_nickname(group_id, int(qq))
+                parts.append(f"[at {name}]")
         else:
             parts.append(str(seg))
     return "".join(parts)

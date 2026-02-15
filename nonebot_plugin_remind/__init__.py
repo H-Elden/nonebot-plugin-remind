@@ -86,7 +86,7 @@ def private_checker():
 
 
 # 创建命令处理器
-remind = on_command("remind", priority=5, block=True)
+remind = on_command("remind", aliases={"提醒"}, priority=5, block=True)
 remind_keyword = on_keyword({"提醒"}, rule=to_me(), priority=6, block=True)
 del_remind = on_command(
     "dr", aliases={"删除提醒", "删除单次提醒"}, priority=5, block=True
@@ -285,13 +285,14 @@ async def _delete_tasks(
             raise ValueError("任务ID超出范围")
         tid = user_tasks[index]["task_id"]
         str_msg = str(user_tasks[index]["reminder_message"])
+        group_id_temp = user_tasks[index]["group_id"] if user_tasks[index]["is_group"] else None
         job = scheduler.get_job(tid)
         if job:
             job.remove()
             info = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
             logger.success(f"成功删除{label}[{tid}]:{info!r}")
             del task_info[tid]
-            display = at_to_text(user_tasks[index]["user_ids"]) + str_msg
+            display = await at_to_text(group_id_temp, user_tasks[index]["user_ids"]) + str_msg
             msg_list.append(f"{index + 1:02d}  {display}")
         else:
             raise RuntimeError(f"任务{index + 1:02d}不存在或已被删除。")
@@ -516,7 +517,8 @@ async def list_reminds_handler(event: Event, args: Message = CommandArg()):
             user_ids = task["user_ids"]
             reminder_message = str(task["reminder_message"])
             # 将其中的at改为纯文本，避免打扰别人
-            msg += at_to_text(user_ids) + reminder_message
+            group_id_temp = task["group_id"] if task["is_group"] else None
+            msg += await at_to_text(group_id_temp, user_ids) + reminder_message
             msg_list.append(msg)
         msgs = "\n\n".join(msg_list)
         try:
@@ -566,7 +568,8 @@ async def list_cron_reminds_handler(event: Event):
             user_ids = task["user_ids"]
             reminder_message = str(task["reminder_message"])
             # 将其中的at改为纯文本，避免打扰别人
-            msg += at_to_text(user_ids) + reminder_message
+            group_id_temp = task["group_id"] if task["is_group"] else None
+            msg += await at_to_text(group_id_temp, user_ids) + reminder_message
             msg_list.append(msg)
         msgs = "\n\n".join(msg_list)
         try:
