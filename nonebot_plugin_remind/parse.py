@@ -3,6 +3,8 @@
 使用 jionlp 离线解析中文时间表达式，GLM-4 作为可选兜底。
 """
 
+from __future__ import annotations
+
 import ast
 import os
 import sys
