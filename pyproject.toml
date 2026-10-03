@@ -27,7 +27,6 @@ dependencies = [
   "nonebot-plugin-localstore>=0.7.3,<0.8.0",
   "nonebot-adapter-onebot>=2.4.6,<3.0.0",
   "nonebot-plugin-apscheduler>=0.5.0,<0.6.0",
-  "zhipuai>=2.1.5,<2.2.0",
   "jsonpickle>=4.0.2,<4.1.0",
   "jionlp>=1.5.16",
 ]
@@ -36,6 +35,12 @@ dependencies = [
 Homepage = "https://github.com/H-Elden/nonebot-plugin-remind"
 Issues = "https://github.com/H-Elden/nonebot-plugin-remind/issues"
 Repository = "https://github.com/H-Elden/nonebot-plugin-remind.git"
+
+[project.optional-dependencies]
+# 大模型兜底（OpenAI 兼容接口）；不安装时该能力自动禁用
+llm = [
+  "openai>=3.0,<4.0",
+]
 
 [dependency-groups]
 dev = [
@@ -46,6 +51,11 @@ dev = [
 [tool.nonebot]
 # 声明本插件（供 nb-cli / nonebot.load_from_toml 加载，例如本地加载测试）
 plugins = ["nonebot_plugin_remind"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

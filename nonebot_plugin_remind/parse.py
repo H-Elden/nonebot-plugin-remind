@@ -1,6 +1,6 @@
 """中文自然语言时间解析模块。
 
-使用 jionlp 离线解析中文时间表达式，GLM-4 作为可选兜底。
+使用 jionlp 离线解析中文时间表达式，大模型（OpenAI 兼容接口）作为可选兜底。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ finally:
 from apscheduler.triggers.cron import CronTrigger
 from nonebot.log import logger
 
-from .glm4 import parsed_cron_time_glm4, parsed_datetime_glm4
+from .llm import parsed_cron_time_llm, parsed_datetime_llm
 
 _DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -48,14 +48,10 @@ async def parse_time(text: str) -> datetime | CronTrigger | None:
     if result is not None:
         return result
 
-    # 2. GLM-4 兜底
-    try:
-        if text.startswith("每"):
-            return await _parse_cron_with_glm4(text)
-        return await _parse_date_with_glm4(text)
-    except Exception as e:
-        logger.error(f"GLM-4 解析异常: {e}")
-        return None
+    # 2. 大模型兜底（未配置或 SDK 未安装时内部静默跳过）
+    if text.startswith("每"):
+        return await _parse_cron_with_llm(text)
+    return await _parse_date_with_llm(text)
 
 
 async def extract_time_and_message(
@@ -86,7 +82,7 @@ async def extract_time_and_message(
         return None, text
 
     if not entities:
-        # jionlp 提取不到，尝试 GLM-4 兜底（此时无法分离消息）
+        # jionlp 提取不到，尝试大模型兜底（此时无法分离消息）
         parsed = await parse_time(text)
         return parsed, "" if parsed else text
 
@@ -258,13 +254,13 @@ def _build_cron_params(delta: dict, pt: datetime) -> dict:
     return {}
 
 
-# ── GLM-4 兜底 ──────────────────────────────────────────────
+# ── 大模型兜底 ──────────────────────────────────────────────
 
 
-async def _parse_date_with_glm4(text: str) -> datetime | None:
-    """GLM-4 解析单次提醒时间。"""
-    logger.info(f'GLM-4 解析单次提醒: "{text}"')
-    res = await parsed_datetime_glm4(text)
+async def _parse_date_with_llm(text: str) -> datetime | None:
+    """大模型解析单次提醒时间。"""
+    logger.info(f'大模型解析单次提醒: "{text}"')
+    res = await parsed_datetime_llm(text)
     if isinstance(res, str) and res not in ("None", "Error", "Failed", "Timeout"):
         try:
             return datetime.strptime(res, "%Y-%m-%d %H:%M")
@@ -273,14 +269,20 @@ async def _parse_date_with_glm4(text: str) -> datetime | None:
     return None
 
 
-async def _parse_cron_with_glm4(text: str) -> CronTrigger | None:
-    """GLM-4 解析循环提醒时间。"""
-    logger.info(f'GLM-4 解析循环提醒: "{text}"')
-    params_str = await parsed_cron_time_glm4(text)
+async def _parse_cron_with_llm(text: str) -> CronTrigger | None:
+    """大模型解析循环提醒时间。"""
+    logger.info(f'大模型解析循环提醒: "{text}"')
+    params_str = await parsed_cron_time_llm(text)
+    if not params_str:
+        return None
     try:
         params = ast.literal_eval(params_str)
-        if isinstance(params, dict):
+    except (ValueError, SyntaxError) as e:
+        logger.warning(f'大模型返回的参数字典无法解析: "{params_str}"（{e}）')
+        return None
+    if isinstance(params, dict):
+        try:
             return CronTrigger(**params)
-    except (ValueError, SyntaxError):
-        pass
+        except (TypeError, ValueError) as e:
+            logger.warning(f"按大模型参数创建 CronTrigger 失败: {e}")
     return None

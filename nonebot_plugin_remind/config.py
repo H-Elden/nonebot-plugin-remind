@@ -11,17 +11,21 @@ class Config(BaseModel):
         default=True,
         description='触发"提醒"关键词时是否发送错误提示',
     )
-    glm_4_model: str = Field(
+    llm_api_key: str = Field(
         default="",
-        description="用于解析单次提醒的 GLM-4 系列大模型名称",
+        description="大模型 API Key（OpenAI 兼容接口；留空则禁用大模型兜底）",
     )
-    glm_4_model_cron: str = Field(
+    llm_base_url: str = Field(
         default="",
-        description="用于解析循环提醒的 GLM-4 系列大模型名称",
+        description="大模型接口地址，如智谱 https://open.bigmodel.cn/api/paas/v4；留空使用 SDK 默认",
     )
-    glm_api_key: str = Field(
+    llm_model: str = Field(
         default="",
-        description="GLM-4 系列大模型的 API_KEY",
+        description="用于解析单次提醒的模型名称",
+    )
+    llm_model_cron: str = Field(
+        default="",
+        description="用于解析循环提醒的模型名称",
     )
 
 
