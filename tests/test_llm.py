@@ -14,10 +14,10 @@ from nonebot_plugin_remind.parse import _parse_cron_with_llm, _parse_date_with_l
 @pytest.fixture
 def configured(monkeypatch):
     """临时配置四项大模型参数（默认未配置）。"""
-    monkeypatch.setattr(plugin_config, "llm_api_key", "test-key")
-    monkeypatch.setattr(plugin_config, "llm_base_url", "")
-    monkeypatch.setattr(plugin_config, "llm_model", "test-datetime-model")
-    monkeypatch.setattr(plugin_config, "llm_model_cron", "test-cron-model")
+    monkeypatch.setattr(plugin_config, "remind_llm_api_key", "test-key")
+    monkeypatch.setattr(plugin_config, "remind_llm_base_url", "")
+    monkeypatch.setattr(plugin_config, "remind_llm_model", "test-datetime-model")
+    monkeypatch.setattr(plugin_config, "remind_llm_model_cron", "test-cron-model")
 
 
 def _install_fake_openai(monkeypatch, *, content=None, error=None):
@@ -38,14 +38,14 @@ def _install_fake_openai(monkeypatch, *, content=None, error=None):
             self.chat = SimpleNamespace(completions=_FakeCompletions())
 
     fake_module = ModuleType("openai")
-    fake_module.AsyncOpenAI = _FakeAsyncOpenAI
+    setattr(fake_module, "AsyncOpenAI", _FakeAsyncOpenAI)
     monkeypatch.setitem(sys.modules, "openai", fake_module)
     return calls
 
 
 async def test_unconfigured_skips_silently(monkeypatch, caplog):
     """未配置 API Key 时静默跳过，不产生 warning 日志。"""
-    monkeypatch.setattr(plugin_config, "llm_api_key", "")
+    monkeypatch.setattr(plugin_config, "remind_llm_api_key", "")
     with caplog.at_level("WARNING"):
         assert await parsed_datetime_llm("明天下午3点") is None
         assert await parsed_cron_time_llm("每天8点") is None

@@ -6,14 +6,16 @@
 import os
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
 import jsonpickle
 import pytest
-from nonebot.adapters.onebot.v11 import Message
+from nonebot.adapters.onebot.v11 import Event, Message
+from nonebot.matcher import Matcher
 from nonebot_plugin_apscheduler import scheduler
 
 import nonebot_plugin_remind
-import nonebot_plugin_remind.data_sourse as data_source
+import nonebot_plugin_remind.data_source as data_source
 import nonebot_plugin_remind.utils as utils
 
 
@@ -59,9 +61,7 @@ async def test_load_valid_file_restores_tasks(isolated):
             "group_id": 10001,
         }
     }
-    tasks_file.write_text(
-        str(jsonpickle.encode(payload, indent=4)), encoding="utf-8"
-    )
+    tasks_file.write_text(str(jsonpickle.encode(payload, indent=4)), encoding="utf-8")
 
     await nonebot_plugin_remind.load_tasks()
 
@@ -106,7 +106,9 @@ async def test_delete_persists_on_midway_error(isolated, monkeypatch):
 
     user_tasks = [task_info["t1"]]
     with pytest.raises(ValueError):
-        await nonebot_plugin_remind._delete_tasks(SimpleNamespace(), user_tasks, [0, 5])
+        await nonebot_plugin_remind._delete_tasks(
+            cast(type[Matcher], SimpleNamespace()), user_tasks, [0, 5]
+        )
 
     assert "t1" not in task_info
     saved = jsonpickle.decode(tasks_file.read_text(encoding="utf-8"))
@@ -147,7 +149,7 @@ async def test_set_reminder_saves_before_success_message(isolated, monkeypatch):
 
     monkeypatch.setattr(data_source.nonebot, "get_bot", lambda: FakeBot())
 
-    event = SimpleNamespace(get_user_id=lambda: "10001")
+    event = cast(Event, SimpleNamespace(get_user_id=lambda: "10001"))
     state = {
         "user_ids": Message(),
         "remind_time": datetime.now() + timedelta(hours=1),
@@ -178,7 +180,7 @@ async def test_delete_missing_task_raises_business_error(isolated, monkeypatch):
 
     with pytest.raises(nonebot_plugin_remind.TaskGoneError):
         await nonebot_plugin_remind._delete_tasks(
-            SimpleNamespace(), [task_info["t1"]], [0]
+            cast(type[Matcher], SimpleNamespace()), [task_info["t1"]], [0]
         )
 
 

@@ -46,6 +46,8 @@ llm = [
 dev = [
   "pytest",
   "pytest-asyncio",
+  "ruff",
+  "pyright",
 ]
 
 [tool.nonebot]
@@ -56,6 +58,25 @@ plugins = ["nonebot_plugin_remind"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# 行宽交给 ruff format 归一，注释允许超宽
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# require() 需先于相关插件的导入，导入无法全部置顶
+"nonebot_plugin_remind/__init__.py" = ["E402"]
+"nonebot_plugin_remind/common.py" = ["E402"]
+# jionlp 导入前后需临时接管 stdout，导入语句无法置于文件头部
+"nonebot_plugin_remind/parse.py" = ["E402", "I001"]
+
+[tool.pyright]
+include = ["nonebot_plugin_remind", "tests"]
+pythonVersion = "3.10"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

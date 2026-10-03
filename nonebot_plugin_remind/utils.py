@@ -10,7 +10,7 @@ from nonebot.adapters.onebot.v11 import Message
 from nonebot.log import logger
 
 from .common import RECURRING_TYPES, TASKS_FILE, task_info
-from .config import remind_config
+from .config import plugin_config
 
 
 # 自定义 JSON 编码器
@@ -24,7 +24,7 @@ class CustomJSONEncoder(json.JSONEncoder):
 jsonpickle.set_encoder_options("json", cls=CustomJSONEncoder)
 
 
-def save_tasks_to_file():
+def save_tasks_to_file() -> None:
     """原子化保存提醒任务到本地文件。
 
     先写入同目录临时文件、再用 os.replace 整体替换，
@@ -53,10 +53,9 @@ async def get_user_nickname(group_id: int, user_id: int) -> str:
     except Exception as e:
         logger.error(f"获取用户昵称失败: {e}")
     return "未知用户"
-    
 
 
-async def at_to_text(group_id: int, user_ids: Message) -> str:
+async def at_to_text(group_id: int | None, user_ids: Message) -> str:
     """将 at 消息段转换为纯文本，用于展示（避免打扰被 at 的人）。
 
     由于QQ版本更新，本项目现不仅仅采用CQ码获取昵称。
@@ -72,8 +71,8 @@ async def at_to_text(group_id: int, user_ids: Message) -> str:
             elif name:
                 parts.append(f"[at {name}]")
             elif group_id is None:
-                parts.append(f"[私聊]")
-            else:
+                parts.append("[私聊]")
+            elif qq is not None:
                 name = await get_user_nickname(group_id, int(qq))
                 parts.append(f"[at {name}]")
         else:
@@ -81,7 +80,7 @@ async def at_to_text(group_id: int, user_ids: Message) -> str:
     return "".join(parts)
 
 
-def format_timedelta(td: timedelta):
+def format_timedelta(td: timedelta) -> str:
     def add_unit(value, unit, result: list):
         if value:
             result.append(f"{value}{unit}")
@@ -110,7 +109,7 @@ def get_user_tasks(user_id: str, group_id: int | None, sort: bool) -> list[dict]
         任务列表
     """
     # 私聊列出所有提醒
-    if remind_config.private_list_all:
+    if plugin_config.remind_private_list_all:
         user_tasks = [
             task
             for task in task_info.values()
@@ -145,7 +144,7 @@ def get_user_cron_tasks(user_id: str, group_id: int | None) -> list[dict]:
         任务列表
     """
     # 私聊列出所有提醒
-    if remind_config.private_list_all:
+    if plugin_config.remind_private_list_all:
         user_tasks = [
             task
             for task in task_info.values()

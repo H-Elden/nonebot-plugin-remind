@@ -19,7 +19,7 @@ from .common import task_info
 from .utils import save_tasks_to_file
 
 
-async def set_date_reminder(event: Event, state: T_State):
+async def set_date_reminder(event: Event, state: T_State) -> None:
     """设置单次定时提醒"""
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
     remind_time = state["remind_time"]  # datetime
@@ -74,7 +74,7 @@ async def set_date_reminder(event: Event, state: T_State):
     }
 
 
-async def set_cron_reminder(event: Event, state: T_State):
+async def set_cron_reminder(event: Event, state: T_State) -> None:
     """设置循环定时提醒"""
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
     trigger = state["remind_time"]  # CronTrigger | IntervalTrigger
@@ -118,7 +118,7 @@ async def set_cron_reminder(event: Event, state: T_State):
 
 
 # 设置定时提醒
-async def set_reminder(event: Event, state: T_State):
+async def set_reminder(event: Event, state: T_State) -> None:
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
     remind_time = state["remind_time"]  # datetime | CronTrigger | IntervalTrigger
 
@@ -179,7 +179,7 @@ async def send_reminder(
     reminder_message: Message,
     is_group: bool = False,
     group_id: int | None = None,
-):
+) -> None:
     bot = nonebot.get_bot()
     str_msg = str(reminder_message)
     if is_group:

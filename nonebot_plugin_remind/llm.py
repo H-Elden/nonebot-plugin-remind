@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false
 """大模型兜底解析客户端（OpenAI 兼容接口）。
 
 - 延迟导入 openai SDK：仅在实际发起解析时导入；SDK 未安装或未配置
@@ -31,7 +32,7 @@ _CRON_SYSTEM_PROMPT = (
 def _datetime_system_prompt() -> str:
     """构建单次提醒解析的系统提示词（含当前时间基准）。"""
     return (
-        f'当前时间是{datetime.now().strftime("%Y-%m-%d %H:%M")}（24小时制时间），'
+        f"当前时间是{datetime.now().strftime('%Y-%m-%d %H:%M')}（24小时制时间），"
         "我提供一个关于时间的表述，请你以当前时间为基准，仅回复我一个未来最符合该表述的时间，"
         '采用"YYYY-MM-DD HH:MM"的格式回复24小时制时间'
         "（提示：晚上12点或者24点都应回复为第二天的0点）；"
@@ -42,7 +43,7 @@ def _datetime_system_prompt() -> str:
 
 def _get_client() -> AsyncOpenAI | None:
     """按需创建 OpenAI 兼容客户端；未配置或 SDK 缺失时返回 None。"""
-    if not plugin_config.llm_api_key:
+    if not plugin_config.remind_llm_api_key:
         logger.debug("未配置大模型 API Key，跳过兜底解析")
         return None
 
@@ -57,8 +58,8 @@ def _get_client() -> AsyncOpenAI | None:
 
     try:
         return AsyncOpenAI(
-            api_key=plugin_config.llm_api_key,
-            base_url=plugin_config.llm_base_url or None,
+            api_key=plugin_config.remind_llm_api_key,
+            base_url=plugin_config.remind_llm_base_url or None,
             timeout=_TIMEOUT_SECONDS,
         )
     except Exception as e:
@@ -103,11 +104,11 @@ async def parsed_datetime_llm(time_text: str) -> str | None:
     """
     if not time_text:
         return None
-    if not plugin_config.llm_model:
-        logger.debug("未配置单次提醒模型（llm_model），跳过兜底解析")
+    if not plugin_config.remind_llm_model:
+        logger.debug("未配置单次提醒模型（remind_llm_model），跳过兜底解析")
         return None
     return await _chat(
-        plugin_config.llm_model,
+        plugin_config.remind_llm_model,
         [
             {"role": "system", "content": _datetime_system_prompt()},
             {"role": "user", "content": time_text},
@@ -125,11 +126,11 @@ async def parsed_cron_time_llm(time_text: str) -> str | None:
     """
     if not time_text:
         return None
-    if not plugin_config.llm_model_cron:
-        logger.debug("未配置循环提醒模型（llm_model_cron），跳过兜底解析")
+    if not plugin_config.remind_llm_model_cron:
+        logger.debug("未配置循环提醒模型（remind_llm_model_cron），跳过兜底解析")
         return None
     return await _chat(
-        plugin_config.llm_model_cron,
+        plugin_config.remind_llm_model_cron,
         [
             {"role": "system", "content": _CRON_SYSTEM_PROMPT},
             {"role": "user", "content": time_text},

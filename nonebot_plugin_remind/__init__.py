@@ -9,6 +9,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.exception import FinishedException
 from nonebot.log import logger
+from nonebot.matcher import Matcher
 from nonebot.params import ArgStr, CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
@@ -26,8 +27,8 @@ from nonebot_plugin_apscheduler import scheduler
 
 from .colloquial import colloquial_time
 from .common import TASKS_FILE, task_info
-from .config import Config, remind_config
-from .data_sourse import send_reminder, set_reminder
+from .config import Config, plugin_config
+from .data_source import send_reminder, set_reminder
 from .migration import migrate_all
 from .parse import extract_time_and_message, parse_time
 from .utils import (
@@ -151,7 +152,7 @@ def _backup_broken_tasks_file() -> None:
 
 # 在机器人启动时加载任务信息
 @driver.on_startup
-async def load_tasks():
+async def load_tasks() -> None:
     if os.path.exists(TASKS_FILE):  # noqa: ASYNC240
         global task_info
         # 直接使用=赋值是不对的，会创建一个新的局部变量而不是修改全局变量
@@ -293,7 +294,7 @@ class TaskGoneError(Exception):
 
 
 async def _delete_tasks(
-    matcher,  # type: ignore[no-untyped-def]
+    matcher: type[Matcher],
     user_tasks: list[dict],
     indexes: list[int],
     *,
@@ -307,14 +308,19 @@ async def _delete_tasks(
                 raise ValueError("任务ID超出范围")
             tid = user_tasks[index]["task_id"]
             str_msg = str(user_tasks[index]["reminder_message"])
-            group_id_temp = user_tasks[index]["group_id"] if user_tasks[index]["is_group"] else None
+            group_id_temp = (
+                user_tasks[index]["group_id"] if user_tasks[index]["is_group"] else None
+            )
             job = scheduler.get_job(tid)
             if job:
                 job.remove()
                 info = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
                 logger.success(f"成功删除{label}[{tid}]:{info!r}")
                 del task_info[tid]
-                display = await at_to_text(group_id_temp, user_tasks[index]["user_ids"]) + str_msg
+                display = (
+                    await at_to_text(group_id_temp, user_tasks[index]["user_ids"])
+                    + str_msg
+                )
                 msg_list.append(f"{index + 1:02d}  {display}")
             else:
                 raise TaskGoneError(f"任务{index + 1:02d}不存在或已被删除。")
@@ -410,14 +416,14 @@ async def _(event: MessageEvent, state: T_State):
 
     if msg_list[0].type != "text":
         state["success"] = False
-        if remind_config.remind_keyword_error:
+        if plugin_config.remind_keyword_error:
             await remind_keyword.send("关键词【提醒】触发：消息应当以文本开头")
         return
 
     keymsg = str(msg_list[0]).strip()
     if "提醒" not in keymsg:
         state["success"] = False
-        if remind_config.remind_keyword_error:
+        if plugin_config.remind_keyword_error:
             await remind_keyword.send("关键词【提醒】触发：“提醒”不在正确的位置")
         return
 
@@ -434,7 +440,7 @@ async def _(event: MessageEvent, state: T_State):
         person_ids, remaining, matched = _extract_person(after, event, msg_list)
         if not matched:
             state["success"] = False
-            if remind_config.remind_keyword_error:
+            if plugin_config.remind_keyword_error:
                 await remind_keyword.send("关键词【提醒】触发：未匹配到提醒人")
             return
         user_ids += person_ids
@@ -445,7 +451,7 @@ async def _(event: MessageEvent, state: T_State):
         person_ids, remaining, matched = _extract_person(after, event, msg_list)
         if not matched:
             state["success"] = False
-            if remind_config.remind_keyword_error:
+            if plugin_config.remind_keyword_error:
                 await remind_keyword.send("关键词【提醒】触发：未匹配到提醒人")
             return
         user_ids += person_ids
@@ -453,14 +459,14 @@ async def _(event: MessageEvent, state: T_State):
         remaining = remaining.strip()
         if not remaining:
             state["success"] = False
-            if remind_config.remind_keyword_error:
+            if plugin_config.remind_keyword_error:
                 await remind_keyword.send("关键词【提醒】触发：未匹配到时间")
             return
 
         parsed_time, msg_after_time = await extract_time_and_message(remaining)
         if parsed_time is None:
             state["success"] = False
-            if remind_config.remind_keyword_error:
+            if plugin_config.remind_keyword_error:
                 await remind_keyword.send("关键词【提醒】触发：未匹配到时间")
             return
         state["remind_time"] = parsed_time
@@ -486,7 +492,7 @@ async def _(event: MessageEvent, state: T_State):
         state["success"] = True
     else:
         state["success"] = False
-        if remind_config.remind_keyword_error:
+        if plugin_config.remind_keyword_error:
             await remind_keyword.send("关键词【提醒】触发：未匹配到提醒信息")
 
 

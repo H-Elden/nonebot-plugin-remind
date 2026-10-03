@@ -12,6 +12,7 @@
 *.lock text eol=lf
 *.gitignore text eol=lf
 *.gitattributes text eol=lf
+.python-version text eol=lf
 
 # 二进制文件不转换
 *.png binary

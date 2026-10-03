@@ -33,7 +33,7 @@ def isolated(tmp_path, monkeypatch):
     避免测试间互相污染。
     """
     import nonebot_plugin_remind
-    import nonebot_plugin_remind.data_sourse as data_source
+    import nonebot_plugin_remind.data_source as data_source
     import nonebot_plugin_remind.utils as utils
     from nonebot_plugin_remind import common
 

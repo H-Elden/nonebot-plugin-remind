@@ -8,6 +8,7 @@
 from pathlib import Path
 
 import nonebot
+
 import nonebot_plugin_remind
 
 PACKAGE_DIR = Path(nonebot_plugin_remind.__file__).parent
