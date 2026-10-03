@@ -3,6 +3,8 @@
 
 - 延迟导入 openai SDK：仅在实际发起解析时导入；SDK 未安装或未配置
   API Key 时静默降级为不可用，不影响插件本体加载与 jionlp 离线主链路；
+- 一次调用由模型自判触发器类型（单次 / 固定时点循环 / 间隔循环），
+  统一回复 JSON 参数；
 - 可对接任意兼容 OpenAI Chat Completions 协议的服务
   （智谱、DeepSeek、硅基流动、本地 vLLM 等）。
 """
@@ -22,22 +24,28 @@ if TYPE_CHECKING:
 # 单次请求超时（秒）
 _TIMEOUT_SECONDS = 30.0
 
-# 循环提醒解析的系统提示词（要求模型仅返回 CronTrigger 参数字典）
-_CRON_SYSTEM_PROMPT = (
-    "我提供一个时间的文本表述用于创建python中的CronTrigger()实例来实现定时，"
-    "请你仅回复一个参数字典（不要用makedown的代码块包裹），用于向CronTrigger()中传递参数。"
-)
 
-
-def _datetime_system_prompt() -> str:
-    """构建单次提醒解析的系统提示词（含当前时间基准）。"""
+def _time_system_prompt() -> str:
+    """构建统一解析提示词（含当前时间基准与三类触发器输出约定）。"""
     return (
         f"当前时间是{datetime.now().strftime('%Y-%m-%d %H:%M')}（24小时制时间），"
-        "我提供一个关于时间的表述，请你以当前时间为基准，仅回复我一个未来最符合该表述的时间，"
-        '采用"YYYY-MM-DD HH:MM"的格式回复24小时制时间'
-        "（提示：晚上12点或者24点都应回复为第二天的0点）；"
-        "如果表述中不能明确是上午或是下午则默认按上午来回复。"
-        '特殊情况：如果符合的时间早于当前 或者 如果我提供的表述无法表示正确的时间则回复"None"。'
+        "我提供一个关于时间的文本表述，请你以当前时间为基准判断它的类型，"
+        "仅回复一行 JSON（不要用 markdown 代码块包裹，不要输出其他任何内容）：\n"
+        '1. 单个时间点：回复 {"type": "date", "datetime": "YYYY-MM-DD HH:MM"}，'
+        "采用24小时制（提示：晚上12点或者24点都应回复为第二天的0点；"
+        "如果表述中不能明确是上午或是下午则默认按上午来回复；"
+        '如果这样的时间点早于当前时刻则回复 "None"）；\n'
+        '2. 固定时点的循环（如"每天8点"、"每周三14:00"、"每月15号"）：'
+        '回复 {"type": "cron", "params": {...}}，'
+        "params 为 python CronTrigger() 的参数字典"
+        "（可用字段：month、day、day_of_week（数字 0 表示周一）、hour、minute、"
+        'second），例如 {"hour": 8, "minute": 0}；\n'
+        '3. 从当前时刻起算的间隔循环（如"每隔30分钟"、"每2小时"、"每两周"）：'
+        '回复 {"type": "interval", "value": N, "unit": "..."}，'
+        "unit 只能为 second、minute、hour、day、week 之一"
+        '（例如 {"value": 30, "unit": "minute"}）；\n'
+        "如果无法确定类型，或者不支持该表述"
+        '（例如"每N个月"、"每N年"的间隔），回复 "None"。'
     )
 
 
@@ -96,45 +104,24 @@ async def _chat(
     return content.strip()
 
 
-async def parsed_datetime_llm(time_text: str) -> str | None:
-    """用大模型解析单次提醒时间。
+async def parsed_time_llm(time_text: str) -> str | None:
+    """用大模型解析时间表述，由模型自判触发器类型并返回统一 JSON 回复。
 
     Returns:
-        "YYYY-MM-DD HH:MM" 文本，或 None（未配置 / 请求失败）。
+        单行 JSON 文本（type 为 date / cron / interval），
+        或 "None"（无法解析）、None（未配置 / 请求失败）。
     """
     if not time_text:
         return None
     if not plugin_config.remind_llm_model:
-        logger.debug("未配置单次提醒模型（remind_llm_model），跳过兜底解析")
+        logger.debug("未配置大模型（remind_llm_model），跳过兜底解析")
         return None
     return await _chat(
         plugin_config.remind_llm_model,
         [
-            {"role": "system", "content": _datetime_system_prompt()},
+            {"role": "system", "content": _time_system_prompt()},
             {"role": "user", "content": time_text},
         ],
-        temperature=0.25,
-        max_tokens=20,
-    )
-
-
-async def parsed_cron_time_llm(time_text: str) -> str | None:
-    """用大模型解析循环提醒的 CronTrigger 参数字典。
-
-    Returns:
-        参数字典文本（如 "{'hour': 8, 'minute': 0}"），或 None（未配置 / 请求失败）。
-    """
-    if not time_text:
-        return None
-    if not plugin_config.remind_llm_model_cron:
-        logger.debug("未配置循环提醒模型（remind_llm_model_cron），跳过兜底解析")
-        return None
-    return await _chat(
-        plugin_config.remind_llm_model_cron,
-        [
-            {"role": "system", "content": _CRON_SYSTEM_PROMPT},
-            {"role": "user", "content": time_text},
-        ],
-        temperature=0.75,
-        max_tokens=40,
+        temperature=0.3,
+        max_tokens=100,
     )

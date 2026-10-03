@@ -30,11 +30,7 @@ class Config(BaseModel):
     )
     remind_llm_model: str = Field(
         default="",
-        description="用于解析单次提醒的模型名称",
-    )
-    remind_llm_model_cron: str = Field(
-        default="",
-        description="用于解析循环提醒的模型名称",
+        description="大模型兜底解析使用的模型名称",
     )
 
 

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import sys
 import time as _time
@@ -25,7 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from nonebot.log import logger
 
-from .llm import parsed_cron_time_llm, parsed_datetime_llm
+from .llm import parsed_time_llm
 
 _DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -51,9 +52,7 @@ async def parse_time(text: str) -> datetime | CronTrigger | IntervalTrigger | No
         return result
 
     # 2. 大模型兜底（未配置或 SDK 未安装时内部静默跳过）
-    if text.startswith("每"):
-        return await _parse_cron_with_llm(text)
-    return await _parse_date_with_llm(text)
+    return await _parse_time_with_llm(text)
 
 
 async def extract_time_and_message(
@@ -300,32 +299,77 @@ def _build_cron_params(delta: dict, pt: datetime) -> dict:
 # ── 大模型兜底 ──────────────────────────────────────────────
 
 
-async def _parse_date_with_llm(text: str) -> datetime | None:
-    """大模型解析单次提醒时间。"""
-    logger.info(f'大模型解析单次提醒: "{text}"')
-    res = await parsed_datetime_llm(text)
-    if isinstance(res, str) and res not in ("None", "Error", "Failed", "Timeout"):
-        try:
-            return datetime.strptime(res, "%Y-%m-%d %H:%M")
-        except ValueError:
-            pass
-    return None
+# interval 回复允许的时间单位（周按 7 天折算；月、年长度不固定，维持不支持）
+_INTERVAL_UNITS = ("second", "minute", "hour", "day", "week")
 
 
-async def _parse_cron_with_llm(text: str) -> CronTrigger | None:
-    """大模型解析循环提醒时间。"""
-    logger.info(f'大模型解析循环提醒: "{text}"')
-    params_str = await parsed_cron_time_llm(text)
-    if not params_str:
+def _extract_json_payload(reply: str) -> dict | None:
+    """从模型回复中提取 JSON 对象（容忍代码块围栏与多余文字）。"""
+    start = reply.find("{")
+    end = reply.rfind("}")
+    if start == -1 or end <= start:
         return None
+    payload_text = reply[start : end + 1]
     try:
-        params = ast.literal_eval(params_str)
-    except (ValueError, SyntaxError) as e:
-        logger.warning(f'大模型返回的参数字典无法解析: "{params_str}"（{e}）')
+        payload = json.loads(payload_text)
+    except ValueError:
+        try:
+            # 容忍模型按旧习惯回复 python 字典字面量（单引号）的情况
+            payload = ast.literal_eval(payload_text)
+        except (ValueError, SyntaxError) as e:
+            logger.warning(f'大模型回复无法解析: "{reply}"（{e}）')
+            return None
+    if not isinstance(payload, dict):
         return None
-    if isinstance(params, dict):
+    return payload
+
+
+async def _parse_time_with_llm(
+    text: str,
+) -> datetime | CronTrigger | IntervalTrigger | None:
+    """大模型统一兜底：按回复中的 type 构建对应触发器。"""
+    logger.info(f'大模型兜底解析: "{text}"')
+    reply = await parsed_time_llm(text)
+    if not reply:
+        return None
+
+    payload = _extract_json_payload(reply)
+    if payload is None:
+        return None
+
+    kind = payload.get("type")
+    if kind == "date":
+        value = payload.get("datetime")
+        if not isinstance(value, str):
+            return None
+        try:
+            return datetime.strptime(value, "%Y-%m-%d %H:%M")
+        except ValueError:
+            logger.warning(f'大模型返回的时间格式不正确: "{value}"')
+            return None
+    if kind == "cron":
+        params = payload.get("params")
+        if not isinstance(params, dict):
+            return None
         try:
             return CronTrigger(**params)
         except (TypeError, ValueError) as e:
             logger.warning(f"按大模型参数创建 CronTrigger 失败: {e}")
+            return None
+    if kind == "interval":
+        return _interval_from_llm(payload)
+    logger.warning(f'大模型回复了未知的触发器类型: "{kind}"')
     return None
+
+
+def _interval_from_llm(payload: dict) -> IntervalTrigger | None:
+    """按 interval 回复中的 value+unit 构建 IntervalTrigger。"""
+    unit = payload.get("unit")
+    if unit not in _INTERVAL_UNITS:
+        logger.warning(f"不支持的间隔单位: {unit!r}")
+        return None
+    value = payload.get("value")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    delta = {"day": float(value) * 7} if unit == "week" else {unit: float(value)}
+    return _build_interval_trigger(delta)
