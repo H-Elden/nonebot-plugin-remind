@@ -167,10 +167,9 @@ async def set_reminder(event: Event, state: T_State):
     msg += MessageSegment.text(
         f"我会在{colloquial_time(remind_time)}准时提醒{pron}的！"
     )
-    await bot.send(event, msg)
-
-    # 保存任务信息到文件
+    # 先落盘再发送反馈：反馈发送失败时任务也不会丢失
     save_tasks_to_file()
+    await bot.send(event, msg)
 
 
 # 定义定时提醒函数

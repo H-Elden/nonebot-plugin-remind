@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import timedelta
 
 import jsonpickle
@@ -24,11 +25,19 @@ jsonpickle.set_encoder_options("json", cls=CustomJSONEncoder)
 
 
 def save_tasks_to_file():
+    """原子化保存提醒任务到本地文件。
+
+    先写入同目录临时文件、再用 os.replace 整体替换，
+    避免写盘中途异常（断电、崩溃）损坏数据文件。
     """
-    将当前提醒任务保存到本地文件
-    """
-    with open(TASKS_FILE, "w", encoding="utf-8") as f:
-        f.write(str(jsonpickle.encode(task_info, indent=4)))
+    data = str(jsonpickle.encode(task_info, indent=4))
+    tmp_file = TASKS_FILE.with_name(TASKS_FILE.name + ".tmp")
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp_file, TASKS_FILE)
+    finally:
+        tmp_file.unlink(missing_ok=True)
     logger.info(f"提醒任务文件已保存到 {TASKS_FILE}")
 
 

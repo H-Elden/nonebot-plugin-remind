@@ -137,17 +137,34 @@ async def _():
         await next_remind.send(f"{type(e).__name__}: {e}")
 
 
+def _backup_broken_tasks_file() -> None:
+    """将无法解析的任务文件转存为带时间戳的备份，避免被后续写入覆盖。"""
+    backup = TASKS_FILE.with_name(
+        f"{TASKS_FILE.stem}.corrupt-{datetime.now():%Y%m%d-%H%M%S}{TASKS_FILE.suffix}"
+    )
+    try:
+        os.replace(TASKS_FILE, backup)
+        logger.warning(f"已转存损坏的任务文件: {backup}")
+    except OSError as e:
+        logger.error(f"转存损坏的任务文件失败: {e}")
+
+
 # 在机器人启动时加载任务信息
 @driver.on_startup
 async def load_tasks():
     if os.path.exists(TASKS_FILE):  # noqa: ASYNC240
         global task_info
-        with open(TASKS_FILE, encoding="utf-8") as f:  # noqa: ASYNC230
-            # 直接使用=赋值是不对的，会创建一个新的局部变量而不是修改全局变量
-            task_info.clear()
-            decoded = jsonpickle.decode(f.read())
-            if isinstance(decoded, dict):
-                task_info.update(decoded)
+        # 直接使用=赋值是不对的，会创建一个新的局部变量而不是修改全局变量
+        task_info.clear()
+        try:
+            with open(TASKS_FILE, encoding="utf-8") as f:  # noqa: ASYNC230
+                decoded = jsonpickle.decode(f.read())
+        except Exception as e:
+            logger.error(f"载入任务文件失败，已转存损坏文件并以空任务集启动: {e}")
+            _backup_broken_tasks_file()
+            decoded = None
+        if isinstance(decoded, dict):
+            task_info.update(decoded)
         total_tasks = 0
         expired_tasks = 0
         current_time = datetime.now()
@@ -280,28 +297,31 @@ async def _delete_tasks(
 ) -> None:
     """按索引删除任务列表中的任务并发送结果消息。"""
     msg_list = []
-    for index in indexes:
-        if index < 0 or index >= len(user_tasks):
-            raise ValueError("任务ID超出范围")
-        tid = user_tasks[index]["task_id"]
-        str_msg = str(user_tasks[index]["reminder_message"])
-        group_id_temp = user_tasks[index]["group_id"] if user_tasks[index]["is_group"] else None
-        job = scheduler.get_job(tid)
-        if job:
-            job.remove()
-            info = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
-            logger.success(f"成功删除{label}[{tid}]:{info!r}")
-            del task_info[tid]
-            display = await at_to_text(group_id_temp, user_tasks[index]["user_ids"]) + str_msg
-            msg_list.append(f"{index + 1:02d}  {display}")
-        else:
-            raise RuntimeError(f"任务{index + 1:02d}不存在或已被删除。")
+    try:
+        for index in indexes:
+            if index < 0 or index >= len(user_tasks):
+                raise ValueError("任务ID超出范围")
+            tid = user_tasks[index]["task_id"]
+            str_msg = str(user_tasks[index]["reminder_message"])
+            group_id_temp = user_tasks[index]["group_id"] if user_tasks[index]["is_group"] else None
+            job = scheduler.get_job(tid)
+            if job:
+                job.remove()
+                info = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
+                logger.success(f"成功删除{label}[{tid}]:{info!r}")
+                del task_info[tid]
+                display = await at_to_text(group_id_temp, user_tasks[index]["user_ids"]) + str_msg
+                msg_list.append(f"{index + 1:02d}  {display}")
+            else:
+                raise RuntimeError(f"任务{index + 1:02d}不存在或已被删除。")
+    finally:
+        # 无论是否中途异常，已删除的部分都要落盘，避免重启后“复活”
+        save_tasks_to_file()
     msgs = "\n\n".join(msg_list)
     try:
         await matcher.send(Message(f"成功删除以下{label}任务！\n" + msgs))
     except Exception:
         await matcher.send(f"成功删除以下{label}任务！(raw)\n" + msgs)
-    save_tasks_to_file()
 
 
 # ── /remind 命令交互 ─────────────────────────────────────────
