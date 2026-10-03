@@ -51,12 +51,12 @@ async def set_date_reminder(event: Event, state: T_State) -> None:
             reminder_message,
             is_group,
             group_id,
-        ],  # 先将None作为任务ID传入
+        ],  # 先将None作为任务序号传入
     )
 
     # 记录任务信息
     task_id = job.id
-    # 更新定时任务参数，将任务ID传递进去
+    # 更新定时任务参数，将任务序号传递进去
     job.modify(args=[task_id, user_ids, reminder_message, is_group, group_id])
     logger.success(f"成功设置提醒任务:{remind_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -94,12 +94,12 @@ async def set_cron_reminder(event: Event, state: T_State) -> None:
             reminder_message,
             is_group,
             group_id,
-        ],  # 先将None作为任务ID传入
+        ],  # 先将None作为任务序号传入
     )
 
     # 记录任务信息
     task_id = job.id
-    # 更新定时任务参数，将任务ID传递进去
+    # 更新定时任务参数，将任务序号传递进去
     job.modify(args=[task_id, user_ids, reminder_message, is_group, group_id])
     logger.success(f"成功设置提醒任务:{trigger}")
 
@@ -130,7 +130,9 @@ async def set_reminder(event: Event, state: T_State) -> None:
         else:
             await set_cron_reminder(event, state)
     except Exception as e:
-        await bot.send(event, f"{type(e).__name__}: {e}")
+        # 透传异常原文（异常类型只写日志），让用户看到的是纯文案
+        logger.error(f"设置提醒失败: {type(e).__name__}: {e}")
+        await bot.send(event, str(e))
         return
 
     # 构建消息
@@ -182,27 +184,38 @@ async def send_reminder(
 ) -> None:
     bot = nonebot.get_bot()
     str_msg = str(reminder_message)
-    if is_group:
-        message = user_ids + reminder_message
-        try:
+
+    async def _send(message: Message) -> None:
+        if is_group:
             await bot.send_group_msg(group_id=group_id, message=message)
-        except Exception as e:
-            await bot.send_group_msg(
-                group_id=group_id,
-                message=user_ids + f"\n{type(e).__name__}: {e}\n{str_msg}",
-            )
-    else:
-        # 发送提醒信息到私聊，私聊时group_id即为用户qq号
+        else:
+            # 私聊时 group_id 即为用户 qq 号
+            await bot.send_private_msg(user_id=group_id, message=message)
+
+    success = False
+    try:
+        if is_group:
+            await _send(user_ids + reminder_message)
+        else:
+            await _send(reminder_message)
+        success = True
+    except Exception as e:
+        logger.error(f"提醒[{task_id}]发送失败: {type(e).__name__}: {e}")
+        # 兜底：原文重发一次，让用户至少看到提醒内容（异常详情只写日志，不给用户看）
         try:
-            await bot.send_private_msg(user_id=group_id, message=reminder_message)
-        except Exception as e:
-            await bot.send_private_msg(
-                user_id=group_id, message=f"\n{type(e).__name__}: {e}\n{str_msg}"
+            await _send(
+                user_ids + Message(f"本条提醒发送异常，原内容如下：\n{str_msg}")
             )
+        except Exception as e2:
+            logger.error(f"提醒[{task_id}]兜底发送同样失败: {type(e2).__name__}: {e2}")
 
     # 任务完成后从任务信息中移除，单次提醒才移除
+    # （无论发送成功与否都要收尾：失败时若继续留在任务集，重启后会被当成错过时点再补发一次）
     if task_id in task_info and task_info[task_id]["type"] == "datetime":
         del task_info[task_id]
         msg = str_msg if len(str_msg) <= 20 else str_msg[:20] + "..."
-        logger.success(f"成功发送提醒[{task_id}]:{msg!r}")
+        if success:
+            logger.success(f"成功发送提醒[{task_id}]:{msg!r}")
+        else:
+            logger.error(f"提醒[{task_id}]发送未成功，已移除该单次任务:{msg!r}")
         save_tasks_to_file()  # 更新任务信息到文件

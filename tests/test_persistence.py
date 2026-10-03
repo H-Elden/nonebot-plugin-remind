@@ -48,7 +48,7 @@ def test_save_failure_keeps_old_file(isolated, monkeypatch):
     assert not list(tasks_file.parent.glob("*.tmp"))
 
 
-async def test_load_valid_file_restores_tasks(isolated):
+async def test_load_valid_file_restores_tasks(isolated, logs):
     tasks_file, task_info = isolated
     payload = {
         "t1": {
@@ -69,6 +69,7 @@ async def test_load_valid_file_restores_tasks(isolated):
     assert "t1" in task_info
     assert scheduler.get_job("t1") is not None
     scheduler.remove_job("t1")
+    assert any("已载入 1 个任务" in m for m in logs), logs
 
 
 async def test_load_corrupt_file_backs_up_and_continues(isolated):
@@ -235,8 +236,8 @@ async def test_load_legacy_file_backs_up_and_continues(isolated):
     assert "旧版内容" in backups[0].read_text(encoding="utf-8")
 
 
-async def test_load_expired_task_marked_for_makeup(isolated, monkeypatch):
-    """过期单次任务载入时写入补发说明并顺延执行时间。"""
+async def test_load_expired_task_marked_for_makeup(isolated, monkeypatch, logs):
+    """过期单次任务载入时写入补发说明并顺延执行时间；日志按「补发」而非「删除」描述。"""
     tasks_file, task_info = isolated
     monkeypatch.setattr(nonebot_plugin_remind.random, "randint", lambda a, b: 10)
     old_time = datetime.now() - timedelta(hours=1)
@@ -264,6 +265,8 @@ async def test_load_expired_task_marked_for_makeup(isolated, monkeypatch):
     assert abs(task["remind_time"] - (datetime.now() + timedelta(seconds=10))) < (
         timedelta(seconds=5)
     )
+    assert any("已载入 0 个任务，1 个错过时点的提醒已补发" in m for m in logs), logs
+    assert not any("删除" in m and "过时任务" in m for m in logs), logs
     scheduler.remove_job("t1")
 
 

@@ -57,6 +57,25 @@ def _clean_scheduler():
 
 
 @pytest.fixture
+def logs():
+    """接管 NoneBot（loguru）日志的用例级 sink，返回记录消息列表。
+
+    标准库的 caplog 抓不到 loguru 的记录（NoneBot 的 logger 不走 logging 模块），
+    故统一用本夹具断言日志文案。
+    """
+    from nonebot.log import logger
+
+    records: list[str] = []
+    sink_id = logger.add(
+        lambda message: records.append(message.record["message"]),
+        level="INFO",
+        format="{message}",
+    )
+    yield records
+    logger.remove(sink_id)
+
+
+@pytest.fixture
 def isolated(tmp_path, monkeypatch):
     """隔离任务文件与全局任务字典，返回 (任务文件路径, 新字典)。
 

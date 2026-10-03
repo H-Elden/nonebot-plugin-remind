@@ -45,7 +45,7 @@ __plugin_meta__ = PluginMetadata(
         "【命令匹配】\n"
         "/remind   设置定时提醒\n"
         "/提醒列表   查看当前所有单次定时任务：只能查看当前群聊定时的任务，私聊可查看全部任务\n"
-        '/删除提醒   删除单次定时任务，例如参数为"1 3-6"时表示删除任务ID为13456这些提醒任务。当参数为"all"时删除当前群全部定时任务。\n'
+        '/删除提醒   删除单次定时任务，例如参数为"1 3-6"时表示删除序号为1、3、4、5、6这些提醒任务。当参数为"all"时删除当前群全部定时任务。\n'
         "/循环提醒列表   查看当前所有循环定时任务，同上\n"
         "/删除循环提醒   删除循环定时任务，同上\n"
         "【关键词匹配】：提醒\n"
@@ -133,8 +133,9 @@ async def _():
     except FinishedException:
         pass
     except Exception as e:
-        logger.error(e)
-        await next_remind.send(f"{type(e).__name__}: {e}")
+        # 异常详情只写日志，用户侧给纯文案
+        logger.error(f"查询下次提醒失败: {type(e).__name__}: {e}")
+        await next_remind.send("查询下次提醒失败，请查看机器人日志。")
 
 
 def _backup_broken_tasks_file() -> None:
@@ -197,7 +198,7 @@ async def load_tasks() -> None:
                 task_info[task_id]["type"] == "datetime"
                 and task_info[task_id]["remind_time"] <= current_time
             ):
-                # 过时任务数+1
+                # 错过时点的提醒数+1
                 expired_tasks += 1
                 # 30秒内发完所有过时信息的提示
                 n = random.randint(10, 30)
@@ -244,10 +245,13 @@ async def load_tasks() -> None:
 
         # 输出信息
         if expired_tasks:
-            info = f"已载入 {total_tasks} 个任务，删除 {expired_tasks} 个过时任务"
+            # 超时任务不是被删除，而是改写提醒时间后补发，日志按实际行为描述
+            info = (
+                f"已载入 {total_tasks} 个任务，{expired_tasks} 个错过时点的提醒已补发"
+            )
             logger.warning(info)
         else:
-            info = f"全部 {total_tasks} 个定时任务均已载入完成！"
+            info = f"已载入 {total_tasks} 个任务"
             logger.success(info)
         save_tasks_to_file()
 
@@ -284,7 +288,7 @@ def _extract_person(
 def _parse_task_indexes(
     raw_ids: str, *, allow_sort_flag: bool = False
 ) -> tuple[list[int], bool]:
-    """解析用户输入的任务ID参数，返回 (索引列表, 是否按提醒时间排序)。
+    """解析用户输入的任务序号参数，返回 (索引列表, 是否按提醒时间排序)。
 
     支持格式: "1 3-6"  "1 2 -s"
     索引从0开始（用户输入从1开始）。
@@ -301,15 +305,15 @@ def _parse_task_indexes(
         elif len(segments) == 2:
             lo, hi = int(segments[0]) - 1, int(segments[1]) - 1
             if lo > hi:
-                raise ValueError(f"{part}为不正确的参数。")
+                raise ValueError("起始序号大于结束序号。")
             indexes.extend(range(lo, hi + 1))
         else:
-            raise ValueError(f'"{part}"为不正确的参数格式。')
-    return list(set(indexes)), sort
+            raise ValueError("序号应写成“1 3-6”这样的形式。")
+    return sorted(set(indexes)), sort
 
 
 class TaskGoneError(Exception):
-    """业务异常：目标任务不存在或已被删除。"""
+    """任务不存在。"""
 
 
 async def _delete_tasks(
@@ -319,12 +323,12 @@ async def _delete_tasks(
     *,
     label: str = "提醒",
 ) -> None:
-    """按索引删除任务列表中的任务并发送结果消息。"""
+    """按序号删除任务列表中的任务并发送结果消息。"""
     msg_list = []
     try:
         for index in indexes:
             if index < 0 or index >= len(user_tasks):
-                raise ValueError("任务ID超出范围")
+                raise ValueError("序号超出范围。")
             tid = user_tasks[index]["task_id"]
             str_msg = str(user_tasks[index]["reminder_message"])
             group_id_temp = (
@@ -531,7 +535,7 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
     raw = args.extract_plain_text().strip()
     if not raw:
-        await del_remind.finish("请提供要删除的任务ID。")
+        await del_remind.finish("请提供要删除的任务序号。")
 
     try:
         if raw == "all":
@@ -544,9 +548,9 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
         user_tasks = get_user_tasks(reminder_user_id, group_id, sort)
         await _delete_tasks(del_remind, user_tasks, indexes, label="提醒")
     except ValueError as e:
-        await del_remind.send(f'任务ID"{raw}"参数错误：{e}')
+        await del_remind.send(f"参数不正确：{e}")
     except TaskGoneError as e:
-        await del_remind.send(f"运行时错误：{e}")
+        await del_remind.send(str(e))
 
 
 # 列出用户的提醒任务
@@ -584,7 +588,7 @@ async def del_cron_remind_handler(event: Event, args: Message = CommandArg()):
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
     raw = args.extract_plain_text().strip()
     if not raw:
-        await del_cron_remind.finish("请提供要删除的循环任务ID。")
+        await del_cron_remind.finish("请提供要删除的循环任务序号。")
 
     try:
         if raw == "all":
@@ -597,9 +601,9 @@ async def del_cron_remind_handler(event: Event, args: Message = CommandArg()):
         user_tasks = get_user_cron_tasks(reminder_user_id, group_id)
         await _delete_tasks(del_cron_remind, user_tasks, indexes, label="循环提醒")
     except ValueError as e:
-        await del_cron_remind.send(f'任务ID"{raw}"参数错误：{e}')
+        await del_cron_remind.send(f"参数不正确：{e}")
     except TaskGoneError as e:
-        await del_cron_remind.send(f"运行时错误：{e}")
+        await del_cron_remind.send(str(e))
 
 
 # 列出用户的循环提醒任务

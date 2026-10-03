@@ -1,8 +1,11 @@
 # push / PR 全量回归：lint 与类型检查跑一次，测试跑 Python 3.10/3.11/3.12 矩阵
+# 说明：发布 tag（v*）的测试门槛由 release.yml 负责，这里不重复触发
 name: test
 
 on:
   push:
+    branches:
+      - "**"
   pull_request:
 
 jobs:

@@ -203,7 +203,7 @@ async def test_del_remind_out_of_range(app: App, isolated):
     e = group_event("/删除提醒 9")
     async with app.test_matcher(plugin.del_remind) as ctx:
         bot = make_bot(ctx)
-        ctx.should_call_send(e, '任务ID"9"参数错误：任务ID超出范围')
+        ctx.should_call_send(e, "参数不正确：序号超出范围。")
         ctx.receive_event(bot, e)
 
     assert task_info == {}
@@ -382,14 +382,14 @@ async def test_del_remind_empty_args_and_bad_format(app: App, isolated):
     e1 = group_event("/删除提醒")
     async with app.test_matcher(plugin.del_remind) as ctx:
         bot = make_bot(ctx)
-        ctx.should_call_send(e1, "请提供要删除的任务ID。")
+        ctx.should_call_send(e1, "请提供要删除的任务序号。")
         ctx.receive_event(bot, e1)
         ctx.should_finished()
 
     e2 = group_event("/删除提醒 1-2-3")
     async with app.test_matcher(plugin.del_remind) as ctx:
         bot = make_bot(ctx)
-        ctx.should_call_send(e2, '任务ID"1-2-3"参数错误："1-2-3"为不正确的参数格式。')
+        ctx.should_call_send(e2, "参数不正确：序号应写成“1 3-6”这样的形式。")
         ctx.receive_event(bot, e2)
 
 
@@ -420,7 +420,7 @@ async def test_del_remind_all_flow_and_task_gone(app: App, isolated):
     e2 = group_event("/删除提醒 1")
     async with app.test_matcher(plugin.del_remind) as ctx:
         bot = make_bot(ctx)
-        ctx.should_call_send(e2, "运行时错误：任务01不存在或已被删除。")
+        ctx.should_call_send(e2, "任务01不存在或已被删除。")
         ctx.receive_event(bot, e2)
     assert "t2" in task_info
 
@@ -433,7 +433,7 @@ async def test_del_cron_empty_all_and_task_gone(app: App, isolated):
     e0 = group_event("/删除循环提醒")
     async with app.test_matcher(plugin.del_cron_remind) as ctx:
         bot = make_bot(ctx)
-        ctx.should_call_send(e0, "请提供要删除的循环任务ID。")
+        ctx.should_call_send(e0, "请提供要删除的循环任务序号。")
         ctx.receive_event(bot, e0)
         ctx.should_finished()
 
@@ -459,6 +459,6 @@ async def test_del_cron_empty_all_and_task_gone(app: App, isolated):
     e2 = group_event("/删除循环提醒 1")
     async with app.test_matcher(plugin.del_cron_remind) as ctx:
         bot = make_bot(ctx)
-        ctx.should_call_send(e2, "运行时错误：任务01不存在或已被删除。")
+        ctx.should_call_send(e2, "任务01不存在或已被删除。")
         ctx.receive_event(bot, e2)
     assert "c2" in task_info
