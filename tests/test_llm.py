@@ -21,7 +21,7 @@ def configured(monkeypatch):
     monkeypatch.setattr(plugin_config, "remind_llm_model", "test-model")
 
 
-def _install_fake_openai(monkeypatch, *, content=None, error=None):
+def _install_fake_openai(monkeypatch, *, content=None, error=None, client_error=None):
     """向 sys.modules 注入假 openai 模块，并记录调用参数。"""
     calls = {}
 
@@ -35,6 +35,8 @@ def _install_fake_openai(monkeypatch, *, content=None, error=None):
 
     class _FakeAsyncOpenAI:
         def __init__(self, **kwargs):
+            if client_error is not None:
+                raise client_error
             calls["client_kwargs"] = kwargs
             self.chat = SimpleNamespace(completions=_FakeCompletions())
 
@@ -194,3 +196,57 @@ async def test_fallback_flows_through_unified_entry(monkeypatch):
     assert await parse_mod.parse_time("从下周一开始每天早上7点") is None
     assert await parse_mod.parse_time("明天下午3点") is None
     assert calls == ["从下周一开始每天早上7点", "明天下午3点"]
+
+
+async def test_date_missing_or_bad_datetime(configured, monkeypatch):
+    """date 回复缺少 datetime 或格式不正确时降级为 None。"""
+    _install_fake_openai(monkeypatch, content='{"type": "date"}')
+    assert await _parse_time_with_llm("表述") is None
+
+    _install_fake_openai(monkeypatch, content='{"type": "date", "datetime": "明天"}')
+    assert await _parse_time_with_llm("表述") is None
+
+
+async def test_cron_missing_params(configured, monkeypatch):
+    """cron 回复缺少 params 时降级为 None。"""
+    _install_fake_openai(monkeypatch, content='{"type": "cron"}')
+    assert await _parse_time_with_llm("表述") is None
+
+
+async def test_interval_invalid_value(configured, monkeypatch):
+    """interval 回复 value 非数字时降级为 None。"""
+    _install_fake_openai(
+        monkeypatch, content='{"type": "interval", "value": "半小时", "unit": "minute"}'
+    )
+    assert await _parse_time_with_llm("表述") is None
+
+
+async def test_api_key_missing_skips_client(monkeypatch):
+    """模型已配置但未配置 Key：客户端构建阶段静默跳过。"""
+    monkeypatch.setattr(plugin_config, "remind_llm_model", "test-model")
+    monkeypatch.setattr(plugin_config, "remind_llm_api_key", "")
+    assert await parsed_time_llm("明天") is None
+
+
+async def test_client_init_failure_falls_back(configured, monkeypatch):
+    """客户端初始化抛错时降级为 None。"""
+    _install_fake_openai(monkeypatch, client_error=RuntimeError("初始化失败"))
+    assert await parsed_time_llm("明天") is None
+
+
+async def test_empty_content_reply(configured, monkeypatch):
+    """回复内容为空时降级为 None。"""
+    _install_fake_openai(monkeypatch, content=None)
+    assert await parsed_time_llm("明天") is None
+
+
+async def test_unparsable_braces_reply(configured, monkeypatch):
+    """带花括号但无法解析的回复降级为 None。"""
+    _install_fake_openai(monkeypatch, content="{这不是合法数据}")
+    assert await _parse_time_with_llm("表述") is None
+
+
+async def test_non_dict_payload_reply(configured, monkeypatch):
+    """解析结果不是字典（如集合字面量）时降级为 None。"""
+    _install_fake_openai(monkeypatch, content="{1, 2, 3}")
+    assert await _parse_time_with_llm("表述") is None

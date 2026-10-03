@@ -48,6 +48,8 @@ dev = [
   "pytest-asyncio",
   "ruff",
   "pyright",
+  "nonebug>=0.4.4,<1.0.0",
+  "pytest-cov>=7.1.0",
 ]
 
 [tool.nonebot]
@@ -57,7 +59,10 @@ plugins = ["nonebot_plugin_remind"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
+# 夹具 loop 采用会话级（nonebug 提供会话级异步夹具，function 级 loop 会 ScopeMismatch）
+asyncio_default_fixture_loop_scope = "session"
+# 本地与 CI 统一输出覆盖率（核心模块行覆盖目标见开发计划）
+addopts = "--cov=nonebot_plugin_remind --cov-report=term-missing"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

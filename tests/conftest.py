@@ -4,6 +4,13 @@
 测试模块会 import ``nonebot_plugin_remind`` 的子模块，而导入子模块必先
 导入父包（父包会创建匹配器并要求调度器就绪），因此 NoneBot 需要先
 init 再 load，与商店加载测试的语义一致。
+
+nonebug 集成说明：
+- nonebug 会话级夹具会再次调用 ``nonebot.init()``，NoneBot 的 init 幂等
+  （已初始化时直接跳过），不会与上方的初始化冲突；
+- 下方 ``pytest_configure`` 关闭 nonebug 的自动 lifespan，保持「调度器
+  未启动、启动钩子不在测试会话中执行」的既有测试语义（任务装载相关
+  用例自行直接调用 ``load_tasks()``）。
 """
 
 import os
@@ -23,6 +30,30 @@ nonebot.init(driver="~none")
 driver = nonebot.get_driver()
 driver.register_adapter(OnebotV11Adapter)
 nonebot.load_from_toml(str(PROJECT_ROOT / "pyproject.toml"))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """关闭 nonebug 自动 lifespan（见模块 docstring）。"""
+    from nonebug import NONEBOT_START_LIFESPAN
+
+    config.stash[NONEBOT_START_LIFESPAN] = False
+
+
+@pytest.fixture(autouse=True)
+def _no_real_llm(monkeypatch):
+    """测试一律禁用真实大模型兜底（防本地 .env 配置触发外呼）。"""
+    from nonebot_plugin_remind.config import plugin_config
+
+    monkeypatch.setattr(plugin_config, "remind_llm_api_key", "")
+
+
+@pytest.fixture(autouse=True)
+def _clean_scheduler():
+    """用例结束后清空调度器，避免任务在用例间残留。"""
+    yield
+    from nonebot_plugin_apscheduler import scheduler
+
+    scheduler.remove_all_jobs()
 
 
 @pytest.fixture

@@ -10,6 +10,7 @@ from typing import cast
 
 import jsonpickle
 import pytest
+from apscheduler.triggers.cron import CronTrigger
 from nonebot.adapters.onebot.v11 import Event, Message
 from nonebot.matcher import Matcher
 from nonebot_plugin_apscheduler import scheduler
@@ -232,3 +233,59 @@ async def test_load_legacy_file_backs_up_and_continues(isolated):
     backups = list(tasks_file.parent.glob("remind_tasks.corrupt-*.json"))
     assert len(backups) == 1
     assert "旧版内容" in backups[0].read_text(encoding="utf-8")
+
+
+async def test_load_expired_task_marked_for_makeup(isolated, monkeypatch):
+    """过期单次任务载入时写入补发说明并顺延执行时间。"""
+    tasks_file, task_info = isolated
+    monkeypatch.setattr(nonebot_plugin_remind.random, "randint", lambda a, b: 10)
+    old_time = datetime.now() - timedelta(hours=1)
+    payload = {
+        "t1": {
+            "task_id": "t1",
+            "reminder_user_id": "10001",
+            "user_ids": Message("[CQ:at,qq=10001]"),
+            "type": "datetime",
+            "remind_time": old_time,
+            "reminder_message": Message("测试内容"),
+            "is_group": False,
+            "group_id": 10001,
+        }
+    }
+    tasks_file.write_text(str(jsonpickle.encode(payload, indent=4)), encoding="utf-8")
+
+    await nonebot_plugin_remind.load_tasks()
+
+    task = task_info["t1"]
+    assert "此提醒任务已超时1小时。" in str(task["reminder_message"])
+    assert f"原定提醒时间为：{old_time.strftime('%Y-%m-%d %H:%M')}" in str(
+        task["reminder_message"]
+    )
+    assert abs(task["remind_time"] - (datetime.now() + timedelta(seconds=10))) < (
+        timedelta(seconds=5)
+    )
+    scheduler.remove_job("t1")
+
+
+async def test_load_valid_cron_task_restored(isolated):
+    """载入含循环任务的合法文件，按触发器恢复调度。"""
+    tasks_file, task_info = isolated
+    payload = {
+        "c1": {
+            "task_id": "c1",
+            "reminder_user_id": "10001",
+            "user_ids": Message("[CQ:at,qq=10001]"),
+            "type": "CronTrigger",
+            "remind_time": CronTrigger(hour=8, minute=0),
+            "reminder_message": Message("循环内容"),
+            "is_group": False,
+            "group_id": 10001,
+        }
+    }
+    tasks_file.write_text(str(jsonpickle.encode(payload, indent=4)), encoding="utf-8")
+
+    await nonebot_plugin_remind.load_tasks()
+
+    assert "c1" in task_info
+    assert scheduler.get_job("c1") is not None
+    scheduler.remove_job("c1")
