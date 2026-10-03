@@ -77,7 +77,7 @@ async def set_date_reminder(event: Event, state: T_State):
 async def set_cron_reminder(event: Event, state: T_State):
     """设置循环定时提醒"""
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
-    cron_trigger = state["remind_time"]  # CronTrigger
+    trigger = state["remind_time"]  # CronTrigger | IntervalTrigger
     reminder_message = state["reminder_message"]  # Message
 
     # 判断是私聊还是群聊
@@ -87,7 +87,7 @@ async def set_cron_reminder(event: Event, state: T_State):
     # 添加定时任务
     job = scheduler.add_job(
         send_reminder,
-        trigger=cron_trigger,
+        trigger=trigger,
         args=[
             None,
             user_ids,
@@ -101,7 +101,7 @@ async def set_cron_reminder(event: Event, state: T_State):
     task_id = job.id
     # 更新定时任务参数，将任务ID传递进去
     job.modify(args=[task_id, user_ids, reminder_message, is_group, group_id])
-    logger.success(f"成功设置提醒任务:{cron_trigger}")
+    logger.success(f"成功设置提醒任务:{trigger}")
 
     # 获取任务发起者（提醒人）的ID
     reminder_user_id = event.get_user_id()
@@ -109,8 +109,8 @@ async def set_cron_reminder(event: Event, state: T_State):
         "task_id": task_id,  # str
         "reminder_user_id": reminder_user_id,  # str
         "user_ids": user_ids,  # str
-        "type": "CronTrigger",  # str
-        "remind_time": cron_trigger,  # CronTrigger
+        "type": type(trigger).__name__,  # str: CronTrigger / IntervalTrigger
+        "remind_time": trigger,  # CronTrigger | IntervalTrigger
         "reminder_message": reminder_message,  # Message
         "is_group": is_group,  # bool
         "group_id": group_id,  # int
@@ -120,7 +120,7 @@ async def set_cron_reminder(event: Event, state: T_State):
 # 设置定时提醒
 async def set_reminder(event: Event, state: T_State):
     user_ids = state["user_ids"]  # 被提醒人的id列表，元素类型为str
-    remind_time = state["remind_time"]  # datetime | CronTrigger
+    remind_time = state["remind_time"]  # datetime | CronTrigger | IntervalTrigger
 
     bot = nonebot.get_bot()
 

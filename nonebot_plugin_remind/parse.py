@@ -22,6 +22,7 @@ finally:
     _devnull.close()
 
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from nonebot.log import logger
 
 from .llm import parsed_cron_time_llm, parsed_datetime_llm
@@ -32,13 +33,14 @@ _DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 # ── 公开接口 ────────────────────────────────────────────────
 
 
-async def parse_time(text: str) -> datetime | CronTrigger | None:
+async def parse_time(text: str) -> datetime | CronTrigger | IntervalTrigger | None:
     """解析中文时间表达式。
 
     Returns:
-        datetime    — 单次提醒
-        CronTrigger — 循环提醒
-        None        — 无法解析
+        datetime        — 单次提醒
+        CronTrigger     — 循环提醒（带锚点，如「每天8:00」）
+        IntervalTrigger — 间隔循环（如「每2小时」）
+        None            — 无法解析
     """
     if not text or not text.strip():
         return None
@@ -56,7 +58,7 @@ async def parse_time(text: str) -> datetime | CronTrigger | None:
 
 async def extract_time_and_message(
     text: str,
-) -> tuple[datetime | CronTrigger | None, str]:
+) -> tuple[datetime | CronTrigger | IntervalTrigger | None, str]:
     """从混合文本中提取时间和剩余消息。
 
     利用 jio.ner.extract_time 精确定位时间子串的位置，
@@ -104,7 +106,7 @@ async def extract_time_and_message(
 # ── jionlp 解析 ─────────────────────────────────────────────
 
 
-def _parse_with_jionlp(text: str) -> datetime | CronTrigger | None:
+def _parse_with_jionlp(text: str) -> datetime | CronTrigger | IntervalTrigger | None:
     """使用 jionlp 解析时间表达式。"""
     try:
         result = jio.parse_time(text, time_base=_time.time())
@@ -126,7 +128,7 @@ def _parse_with_jionlp(text: str) -> datetime | CronTrigger | None:
         "time_point": _parse_timestamp,
         "time_span": _parse_timestamp,
         "time_delta": _delta_to_datetime,
-        "time_period": _period_to_cron,
+        "time_period": _period_to_trigger,
     }.get(time_type)
 
     if converter is None:
@@ -184,10 +186,12 @@ def _delta_to_datetime(data) -> datetime | None:
         return None
 
 
-def _period_to_cron(data: dict) -> CronTrigger | None:
-    """time_period → CronTrigger。
+def _period_to_trigger(data: dict) -> CronTrigger | IntervalTrigger | None:
+    """time_period → CronTrigger 或 IntervalTrigger。
 
     data 格式: {'delta': {'day': 1}, 'point': {'time': [...], 'string': '...'}}
+    - point 为空（纯间隔，如「每2小时」）→ IntervalTrigger；
+    - point 有值（带锚点，如「每天8:00」）→ CronTrigger。
     """
     try:
         delta = data.get("delta", {})
@@ -196,6 +200,9 @@ def _period_to_cron(data: dict) -> CronTrigger | None:
         if not delta:
             return None
 
+        if point is None:
+            return _build_interval_trigger(delta)
+
         pt = _extract_point_time(point)
         if pt is None:
             return None
@@ -203,8 +210,32 @@ def _period_to_cron(data: dict) -> CronTrigger | None:
         params = _build_cron_params(delta, pt)
         return CronTrigger(**params) if params else None
     except (TypeError, ValueError) as e:
-        logger.debug(f"time_period → CronTrigger 失败: {e}")
+        logger.debug(f"time_period → 触发器失败: {e}")
         return None
+
+
+def _build_interval_trigger(delta: dict) -> IntervalTrigger | None:
+    """根据无锚点的 delta 构建 IntervalTrigger（每 N 秒/分钟/小时/天/周）。
+
+    月、年长度不固定，无法用固定间隔精确表达，维持不支持。
+    """
+    if "second" in delta:
+        total_seconds = float(delta["second"])
+    elif "minute" in delta:
+        total_seconds = float(delta["minute"]) * 60
+    elif "hour" in delta:
+        total_seconds = float(delta["hour"]) * 3600
+    elif "day" in delta:
+        total_seconds = float(delta["day"]) * 86400
+    elif "month" in delta or "year" in delta:
+        logger.warning("暂不支持「每 N 个月 / 每 N 年」的间隔提醒")
+        return None
+    else:
+        return None
+
+    if total_seconds < 1:
+        return None
+    return IntervalTrigger(seconds=int(total_seconds))
 
 
 def _extract_point_time(point: dict | None) -> datetime | None:
@@ -221,6 +252,10 @@ def _build_cron_params(delta: dict, pt: datetime) -> dict:
     """根据 delta 类型和 point 时间构建 CronTrigger 参数。"""
     if "hour" in delta:
         # 每小时的 XX 分
+        hour_val = float(delta["hour"])
+        if hour_val != 1:
+            logger.warning(f"不支持每 {delta['hour']} 小时的 Cron 周期")
+            return {}
         return {"minute": pt.minute}
 
     if "day" in delta:
@@ -239,10 +274,18 @@ def _build_cron_params(delta: dict, pt: datetime) -> dict:
         return {}
 
     if "month" in delta:
+        month_val = int(delta["month"])
+        if month_val != 1:
+            logger.warning(f"不支持每 {month_val} 个月的 Cron 周期")
+            return {}
         # 每月
         return {"day": pt.day, "hour": pt.hour, "minute": pt.minute}
 
     if "year" in delta:
+        year_val = int(delta["year"])
+        if year_val != 1:
+            logger.warning(f"不支持每 {year_val} 年的 Cron 周期")
+            return {}
         # 每年
         return {
             "month": pt.month,

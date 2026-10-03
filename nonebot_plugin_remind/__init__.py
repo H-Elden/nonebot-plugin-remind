@@ -288,6 +288,10 @@ def _parse_task_indexes(
     return list(set(indexes)), sort
 
 
+class TaskGoneError(Exception):
+    """业务异常：目标任务不存在或已被删除。"""
+
+
 async def _delete_tasks(
     matcher,  # type: ignore[no-untyped-def]
     user_tasks: list[dict],
@@ -313,7 +317,7 @@ async def _delete_tasks(
                 display = await at_to_text(group_id_temp, user_tasks[index]["user_ids"]) + str_msg
                 msg_list.append(f"{index + 1:02d}  {display}")
             else:
-                raise RuntimeError(f"任务{index + 1:02d}不存在或已被删除。")
+                raise TaskGoneError(f"任务{index + 1:02d}不存在或已被删除。")
     finally:
         # 无论是否中途异常，已删除的部分都要落盘，避免重启后“复活”
         save_tasks_to_file()
@@ -516,7 +520,7 @@ async def del_remind_handler(event: Event, args: Message = CommandArg()):
         await _delete_tasks(del_remind, user_tasks, indexes, label="提醒")
     except ValueError as e:
         await del_remind.send(f'任务ID"{raw}"参数错误：{e}')
-    except RuntimeError as e:
+    except TaskGoneError as e:
         await del_remind.send(f"运行时错误：{e}")
 
 
@@ -569,7 +573,7 @@ async def del_cron_remind_handler(event: Event, args: Message = CommandArg()):
         await _delete_tasks(del_cron_remind, user_tasks, indexes, label="循环提醒")
     except ValueError as e:
         await del_cron_remind.send(f'任务ID"{raw}"参数错误：{e}')
-    except RuntimeError as e:
+    except TaskGoneError as e:
         await del_cron_remind.send(f"运行时错误：{e}")
 
 

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 import nonebot
+import pytest
 from nonebot.adapters.onebot.v11 import Adapter as OnebotV11Adapter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -22,3 +23,24 @@ nonebot.init(driver="~none")
 driver = nonebot.get_driver()
 driver.register_adapter(OnebotV11Adapter)
 nonebot.load_from_toml(str(PROJECT_ROOT / "pyproject.toml"))
+
+
+@pytest.fixture
+def isolated(tmp_path, monkeypatch):
+    """隔离任务文件与全局任务字典，返回 (任务文件路径, 新字典)。
+
+    各模块的 TASKS_FILE / task_info 绑定统一替换到临时目录与同一份新字典，
+    避免测试间互相污染。
+    """
+    import nonebot_plugin_remind
+    import nonebot_plugin_remind.data_sourse as data_source
+    import nonebot_plugin_remind.utils as utils
+    from nonebot_plugin_remind import common
+
+    tasks_file = tmp_path / "remind_tasks.json"
+    fresh: dict = {}
+    for module in (common, utils, nonebot_plugin_remind):
+        monkeypatch.setattr(module, "TASKS_FILE", tasks_file)
+    for module in (common, utils, nonebot_plugin_remind, data_source):
+        monkeypatch.setattr(module, "task_info", fresh)
+    return tasks_file, fresh

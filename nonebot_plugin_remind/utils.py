@@ -9,7 +9,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import Message
 from nonebot.log import logger
 
-from .common import TASKS_FILE, task_info
+from .common import RECURRING_TYPES, TASKS_FILE, task_info
 from .config import remind_config
 
 
@@ -150,7 +150,7 @@ def get_user_cron_tasks(user_id: str, group_id: int | None) -> list[dict]:
             task
             for task in task_info.values()
             if task["reminder_user_id"] == user_id
-            and task["type"] == "CronTrigger"
+            and task["type"] in RECURRING_TYPES
             and (group_id is None or task["group_id"] == group_id)
         ]
     # 私聊仅列出私聊提醒
@@ -159,7 +159,7 @@ def get_user_cron_tasks(user_id: str, group_id: int | None) -> list[dict]:
             task
             for task in task_info.values()
             if task["reminder_user_id"] == user_id
-            and task["type"] == "CronTrigger"
+            and task["type"] in RECURRING_TYPES
             and (
                 (group_id is None and task["group_id"] == int(user_id))
                 or task["group_id"] == group_id

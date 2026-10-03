@@ -39,11 +39,21 @@ def migrate_task(task_id: str, task: dict) -> bool:
 
 
 def migrate_all(task_info: dict) -> int:
-    """迁移所有任务，返回变更数量。"""
+    """迁移所有任务，返回变更数量。
+
+    单条任务迁移失败时告警并从任务集中剔除，避免后续载入流程出错。
+    """
     count = 0
+    failed: list[str] = []
     for task_id, task in task_info.items():
-        if migrate_task(task_id, task):
-            count += 1
+        try:
+            if migrate_task(task_id, task):
+                count += 1
+        except Exception as e:
+            logger.warning(f"[迁移] 任务 {task_id} 迁移失败，已跳过: {e}")
+            failed.append(task_id)
+    for task_id in failed:
+        task_info.pop(task_id, None)
     if count:
         logger.info(f"[迁移] 共迁移 {count} 个任务")
     return count

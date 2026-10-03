@@ -145,6 +145,7 @@ dmypy.json
 data/
 1pyproject.toml
 requirements.txt
+.vscode/
 
 # AI 助手工作文件（不入库、不发布）
 doc/

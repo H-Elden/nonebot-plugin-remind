@@ -1,7 +1,6 @@
 """数据持久化加固测试：原子写、容错载入、删除与保存时序。
 
-隔离方式：把「任务文件路径」与「全局任务字典」在各相关模块中的绑定
-统一替换到临时目录与同一份新字典，避免测试间互相污染。
+隔离方式见 conftest 的 isolated 夹具。
 """
 
 import os
@@ -16,19 +15,6 @@ from nonebot_plugin_apscheduler import scheduler
 import nonebot_plugin_remind
 import nonebot_plugin_remind.data_sourse as data_source
 import nonebot_plugin_remind.utils as utils
-from nonebot_plugin_remind import common
-
-
-@pytest.fixture
-def isolated(tmp_path, monkeypatch):
-    """隔离任务文件与全局任务字典，返回 (任务文件路径, 新字典)。"""
-    tasks_file = tmp_path / "remind_tasks.json"
-    fresh: dict = {}
-    for module in (common, utils, nonebot_plugin_remind):
-        monkeypatch.setattr(module, "TASKS_FILE", tasks_file)
-    for module in (common, utils, nonebot_plugin_remind, data_source):
-        monkeypatch.setattr(module, "task_info", fresh)
-    return tasks_file, fresh
 
 
 def test_save_is_atomic_and_leaves_no_tmp(isolated):
@@ -173,3 +159,38 @@ async def test_set_reminder_saves_before_success_message(isolated, monkeypatch):
     assert order == ["schedule", "save", "send"]
     saved = jsonpickle.decode(tasks_file.read_text(encoding="utf-8"))
     assert "t-new" in saved
+
+
+async def test_delete_missing_task_raises_business_error(isolated, monkeypatch):
+    """任务不存在时抛业务异常 TaskGoneError（与系统异常区分）。"""
+    _, task_info = isolated
+    task_info["t1"] = {
+        "task_id": "t1",
+        "reminder_message": Message("内容一"),
+        "user_ids": Message(),
+        "is_group": False,
+        "group_id": 10001,
+        "type": "datetime",
+        "remind_time": datetime.now() + timedelta(hours=1),
+        "reminder_user_id": "10001",
+    }
+    monkeypatch.setattr(scheduler, "get_job", lambda tid: None)
+
+    with pytest.raises(nonebot_plugin_remind.TaskGoneError):
+        await nonebot_plugin_remind._delete_tasks(
+            SimpleNamespace(), [task_info["t1"]], [0]
+        )
+
+
+def test_migrate_all_skips_broken_task():
+    """单条任务迁移失败时跳过剔除，不影响其他任务。"""
+    from nonebot_plugin_remind.migration import migrate_all
+
+    task_info = {
+        "good": {"remind_time": "2026-10-10 09:00:00"},
+        "broken": {"remind_time": "不是时间"},
+    }
+    count = migrate_all(task_info)
+    assert count == 1
+    assert task_info["good"]["type"] == "datetime"
+    assert "broken" not in task_info

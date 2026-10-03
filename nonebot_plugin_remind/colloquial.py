@@ -1,9 +1,10 @@
 import re
 from datetime import datetime
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 
-def colloquial_time(remind_time: datetime | CronTrigger) -> str:
+def colloquial_time(remind_time: datetime | CronTrigger | IntervalTrigger) -> str:
     """
     将remind_time转换成口语化的时间表达。
     """
@@ -11,6 +12,8 @@ def colloquial_time(remind_time: datetime | CronTrigger) -> str:
         return colloquial_datetime(remind_time)
     elif isinstance(remind_time, CronTrigger):
         return colloquial_crontrigger(remind_time)
+    elif isinstance(remind_time, IntervalTrigger):
+        return colloquial_intervaltrigger(remind_time)
     else:
         raise TypeError("提醒时间类型不正确")
 
@@ -214,3 +217,17 @@ def colloquial_crontrigger(trigger: CronTrigger) -> str:
         components.append(time_str)
 
     return "".join(components) if components else "每时每刻"
+
+
+def colloquial_intervaltrigger(trigger: IntervalTrigger) -> str:
+    """将 IntervalTrigger 转换成口语化的时间表达（如「每隔 3 天」）。"""
+    total_seconds = int(trigger.interval.total_seconds())
+    if total_seconds % 604800 == 0:
+        return f"每隔 {total_seconds // 604800} 周"
+    if total_seconds % 86400 == 0:
+        return f"每隔 {total_seconds // 86400} 天"
+    if total_seconds % 3600 == 0:
+        return f"每隔 {total_seconds // 3600} 小时"
+    if total_seconds % 60 == 0:
+        return f"每隔 {total_seconds // 60} 分钟"
+    return f"每隔 {total_seconds} 秒"
