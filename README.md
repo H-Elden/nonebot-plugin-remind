@@ -41,13 +41,16 @@
 
 在 nonebot2 项目的`.env`文件中添加如下可选配置
 
-|         配置项         | 必填  | 默认值 |                                                说明                                                 |
-| :--------------------: | :---: | :----: | :-------------------------------------------------------------------------------------------------: |
-|   `private_list_all`   |  否   | `Ture` |                            私聊中"/提醒列表"命令是否列出私聊群聊全部提醒                            |
-| `remind_keyword_error` |  否   | `Ture` |                                 触发“提醒”关键词时是否发送错误提示                                  |
-|     `GLM_4_MODEL`      |  否   |  `""`  | 仅用于解析**单次**提醒的[GLM-4系列大模型](https://www.bigmodel.cn/dev/api/normal-model/glm-4)的名称 |
-|   `GLM_4_MODEL_CRON`   |  否   |  `""`  | 仅用于解析**循环**提醒的[GLM-4系列大模型](https://www.bigmodel.cn/dev/api/normal-model/glm-4)的名称 |
-|     `GLM_API_KEY`      |  否   |  `""`  |          GLM-4系列大模型的[API_KEY](https://www.bigmodel.cn/usercenter/proj-mgmt/apikeys)           |
+|         配置项         | 必填  | 默认值 |                                                 说明                                                  |
+| :--------------------: | :---: | :----: | :---------------------------------------------------------------------------------------------------: |
+|   `remind_private_list_all`   |  否   | `True` |                            私聊中"/提醒列表"命令是否列出私聊群聊全部提醒                             |
+| `remind_keyword_error` |  否   | `True` |                                  触发“提醒”关键词时是否发送错误提示                                   |
+|      `remind_llm_api_key`     |  否   |  `""`  |            大模型 API Key（OpenAI 兼容接口；留空则禁用大模型兜底；需安装 `[llm]` 附加依赖）            |
+|     `remind_llm_base_url`     |  否   |  `""`  | 大模型接口地址，例如智谱：`https://open.bigmodel.cn/api/paas/v4`；留空使用 SDK 默认（api.openai.com） |
+|      `remind_llm_model`       |  否   |  `""`  |                          用于解析**单次**提醒的模型名称（可对接任意兼容平台）                          |
+|    `remind_llm_model_cron`    |  否   |  `""`  |                          用于解析**循环**提醒的模型名称（可对接任意兼容平台）                          |
+
+> **大模型兜底为可选能力**：需先安装附加依赖 `pip install nonebot-plugin-remind[llm]`；支持任意兼容 OpenAI Chat Completions 协议的服务（智谱、DeepSeek、硅基流动、本地 vLLM 等）。
 
 ## 🎉 使用
 
@@ -75,7 +78,7 @@
     - `2025-1-1 8:00`、`9月10日18:00`、`21:12`
     - ……
 
-    当正确配置了 `GLM_4_MODEL` 和 `GLM_API_KEY` 这两个环境变量之后，jionlp 无法解析的时间表达式将由 GLM-4 兜底解析，你将获得**更自由更符合人类语言的丰富体验**，包括但不限于：
+    安装 `[llm]` 附加依赖并正确配置 `remind_llm_api_key` 与 `remind_llm_model` 之后，jionlp 无法解析的时间表达式将由大模型（OpenAI 兼容接口）兜底解析，你将获得**更自由更符合人类语言的丰富体验**，包括但不限于：
     - `明天晚上八点1刻`
     - `20分钟后`
     - `下周三的同一时间`
@@ -83,16 +86,18 @@
     - `10月1日提前10天的正午12点`
     - ……
 
-    **特别提醒：** 推荐使用免费的"glm-4-flash"模型，即可满足大部分简单需求。越复杂的时间描述（如 `一坤时后` ）对大语言模型的理解能力需求越高，需合理选择大模型。
+    **特别提醒：** 以智谱平台为例，推荐使用免费的"glm-4-flash"模型，即可满足大部分简单需求。越复杂的时间描述（如 `一坤时后` ）对大语言模型的理解能力需求越高，需合理选择大模型。
 
     除此之外，时间部分还支持**循环提醒**的设置（jionlp 可直接识别周期性时间表达式）：
     - `每年3月12日7:00`
     - `每月22日22:00`
     - `每周一三五18:00`
-    - `每天15:00`
-    - `每小时30分`
+    - `每天15:00`、`每小时`
+    - `每2小时`、`每隔30分钟`
 
-    - **特别提醒：** 与单次提醒不同，免费的"glm-4-flash"模型在解析循环提醒获取参数时**表现不佳**，建议选择更智能的模型，比如"glm-4-plus"，因此提供了不同的环境变量设置 (`GLM_4_MODEL_CRON`) 。
+    （`每 N 分钟/小时/天/周` 等间隔表达从设置时刻起算，例如 10:07 设置 `每隔30分钟`，会在 10:37、11:07 …… 依次提醒。）
+
+    - **特别提醒：** 与单次提醒不同，免费的"glm-4-flash"模型在解析循环提醒获取参数时**表现不佳**，建议选择更智能的模型，比如"glm-4-plus"，因此提供了单独的配置项（`remind_llm_model_cron`）。
 
 - **'提醒'**： 要匹配的关键字，必须完全一致
 
@@ -132,7 +137,7 @@
 
 当在私聊中触发此指令时，返回所有私聊和群聊中设置的提醒。
 
-**注意**：当配置环境变量 `private_list_all=false` 时，私聊时也仅返回私聊中设置的提醒。
+**注意**：当配置环境变量 `remind_private_list_all=false` 时，私聊时也仅返回私聊中设置的提醒。
 
 #### 循环提醒列表
 
@@ -155,13 +160,13 @@
 
 ### 示例图
 
-本示例，均为未配置GLM-4大语言模型情况下，基于jionlp进行时间解析所实现的。
+本示例，均为未启用大模型兜底的情况下，基于 jionlp 进行时间解析所实现的。
 
 <table style="width:100%; border-collapse: collapse;">
   <thead>
     <tr style="border: 1px solid black;">
-      <th style="text-align:center; border: 1px solid black;">提醒关键词示例图</th>
       <th style="text-align:center; border: 1px solid black;">提醒命令示例图</th>
+      <th style="text-align:center; border: 1px solid black;">提醒关键词示例图</th>
       <th style="text-align:center; border: 1px solid black;">提醒列表命令示例图</th>
       <th style="text-align:center; border: 1px solid black;">删除提醒命令示例图</th>
       <th style="text-align:center; border: 1px solid black;">私聊使用示例图</th>
