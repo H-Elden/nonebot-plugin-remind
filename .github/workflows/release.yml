@@ -1,0 +1,71 @@
+# 推 v* tag → 全量测试（发布门槛）→ 构建并发布 PyPI（Trusted Publishing）+ 创建 GitHub Release
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    name: 发布门槛（全量测试）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      # uv sync 默认包含 [dependency-groups].dev（pytest / nonebug 等）
+      - name: 全量测试
+        run: uv run pytest
+
+  release:
+    name: 发布 PyPI 与 GitHub Release
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      # 建 GitHub Release
+      contents: write
+      # PyPI Trusted Publishing（OIDC），无需存储 token
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # 先于构建/发布校验并提取本版说明：缺小节时直接失败，不会出现「PyPI 已发、Release 没说明」的半成品
+      - name: 提取 CHANGELOG 本版说明
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          lines = open("CHANGELOG.md", encoding="utf-8").read().splitlines()
+          body, capture = [], False
+          for line in lines:
+              if line.startswith("## "):
+                  if capture:
+                      break
+                  capture = re.match(rf"^##\s*\[?{re.escape(version)}\]?(?:\s|$)", line) is not None
+                  continue
+              if capture:
+                  body.append(line)
+          notes = "\n".join(body).strip()
+          if not notes:
+              sys.exit(f"CHANGELOG.md 中没有 {version} 的小节：请先补写该版本小节并提交，再重新打标签发布。")
+          with open(".release-notes.md", "w", encoding="utf-8") as f:
+              f.write(notes + "\n")
+          print(notes)
+          PY
+      - uses: astral-sh/setup-uv@v6
+      - name: 构建 sdist + wheel
+        run: uv build
+      - name: 发布到 PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 正文取自 CHANGELOG 对应版本小节；generate_release_notes 再自动追加 Full Changelog 链接
+          body_path: .release-notes.md
+          generate_release_notes: true
