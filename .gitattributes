@@ -1,0 +1,19 @@
+# 统一文本行尾为 LF（跨平台协作；ruff/uv 生态均按 LF 处理）
+* text=auto
+
+*.py  text eol=lf
+*.pyi text eol=lf
+*.md  text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.lock text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# 二进制文件不转换
+*.png binary
+*.jpg binary
+*.ico binary
