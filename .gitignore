@@ -145,3 +145,9 @@ dmypy.json
 data/
 1pyproject.toml
 requirements.txt
+
+# AI 助手工作文件（不入库、不发布）
+doc/
+AGENTS.md
+memory/
+.ref/
