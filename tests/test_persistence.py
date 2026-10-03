@@ -184,15 +184,51 @@ async def test_delete_missing_task_raises_business_error(isolated, monkeypatch):
         )
 
 
-def test_migrate_all_skips_broken_task():
-    """单条任务迁移失败时跳过剔除，不影响其他任务。"""
-    from nonebot_plugin_remind.migration import migrate_all
+def test_has_legacy_tasks_detection():
+    """0.1.x 旧格式三种特征与非字典值的识别。"""
+    from nonebot_plugin_remind import _has_legacy_tasks
 
-    task_info = {
-        "good": {"remind_time": "2026-10-10 09:00:00"},
-        "broken": {"remind_time": "不是时间"},
+    assert _has_legacy_tasks({}) is False
+    assert _has_legacy_tasks({"t1": {"type": "datetime"}}) is False
+    # 无 type 字段
+    assert _has_legacy_tasks({"t1": {"remind_time": "2026-10-10 09:00:00"}}) is True
+    # reminder_message 为字符串
+    assert (
+        _has_legacy_tasks({"t1": {"type": "datetime", "reminder_message": "文本"}})
+        is True
+    )
+    # user_ids 为 CQ 码字符串
+    assert (
+        _has_legacy_tasks({"t1": {"type": "datetime", "user_ids": "[CQ:at,qq=1]"}})
+        is True
+    )
+    # 非字典任务
+    assert _has_legacy_tasks({"t1": "不是字典"}) is True
+
+
+async def test_load_legacy_file_backs_up_and_continues(isolated):
+    """0.1.x 旧格式文件不再迁移：转存备份、以空任务集继续启动。"""
+    tasks_file, task_info = isolated
+    legacy_payload = {
+        "t1": {
+            "reminder_user_id": "10001",
+            "user_ids": "[CQ:at,qq=10001] ",
+            "remind_time": "2026-10-10 09:00:00",
+            "reminder_message": "旧版内容",
+            "is_group": False,
+            "group_id": 10001,
+        }
     }
-    count = migrate_all(task_info)
-    assert count == 1
-    assert task_info["good"]["type"] == "datetime"
-    assert "broken" not in task_info
+    tasks_file.write_text(
+        str(jsonpickle.encode(legacy_payload, indent=4)), encoding="utf-8"
+    )
+
+    await nonebot_plugin_remind.load_tasks()
+
+    # 旧任务未被载入，文件被重建为空任务集
+    assert task_info == {}
+    assert jsonpickle.decode(tasks_file.read_text(encoding="utf-8")) == {}
+    # 旧文件被转存为备份
+    backups = list(tasks_file.parent.glob("remind_tasks.corrupt-*.json"))
+    assert len(backups) == 1
+    assert "旧版内容" in backups[0].read_text(encoding="utf-8")

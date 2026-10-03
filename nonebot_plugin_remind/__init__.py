@@ -29,7 +29,6 @@ from .colloquial import colloquial_time
 from .common import TASKS_FILE, task_info
 from .config import Config, plugin_config
 from .data_source import send_reminder, set_reminder
-from .migration import migrate_all
 from .parse import extract_time_and_message, parse_time
 from .utils import (
     at_to_text,
@@ -150,6 +149,22 @@ def _backup_broken_tasks_file() -> None:
         logger.error(f"转存损坏的任务文件失败: {e}")
 
 
+def _has_legacy_tasks(tasks: dict) -> bool:
+    """识别 0.1.x 旧版任务格式（自 0.3.0 起不再自动迁移）。
+
+    旧特征：缺 type 字段、reminder_message 为字符串、user_ids 为 CQ 码字符串；
+    命中任意一条即视为整个文件为旧格式，转存备份后以空任务集启动。
+    """
+    for task in tasks.values():
+        if not isinstance(task, dict) or "type" not in task:
+            return True
+        if isinstance(task.get("reminder_message"), str):
+            return True
+        if isinstance(task.get("user_ids"), str):
+            return True
+    return False
+
+
 # 在机器人启动时加载任务信息
 @driver.on_startup
 async def load_tasks() -> None:
@@ -165,13 +180,17 @@ async def load_tasks() -> None:
             _backup_broken_tasks_file()
             decoded = None
         if isinstance(decoded, dict):
-            task_info.update(decoded)
+            if _has_legacy_tasks(decoded):
+                logger.error(
+                    "任务文件为 0.1.x 旧版格式，自 0.3.0 起不再自动迁移；"
+                    "已转存备份并以空任务集启动"
+                )
+                _backup_broken_tasks_file()
+            else:
+                task_info.update(decoded)
         total_tasks = 0
         expired_tasks = 0
         current_time = datetime.now()
-        # 迁移旧版数据格式
-        if migrate_all(task_info):
-            save_tasks_to_file()
         for task_id in task_info:
             # 检查定时任务是否过时
             if (
